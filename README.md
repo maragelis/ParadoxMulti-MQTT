@@ -1,10 +1,10 @@
 # Paradox Multi-MQTT
 Python-based 'middle-ware' that aims to use any method to connect to a Paradox Alarm, exposing the interface for monitoring and control via an MQTT Broker.
-Currently access through the Serial port is implemented. As this is highly based on the [ParadoxIP150v2](https://github.com/Tertiush/ParadoxIP150v2) project, access through the IP150 can be easily added (volunteers?)
+Currently access through the Serial port is implemented. As this a fork of the [ParadoxIP150v2](https://github.com/Tertiush/ParadoxIP150v2) project, access through the IP150 can be easily (re-)added (volunteers?)
 
 ## Origin
 
-Most of the code, and this READMY is taken from the [ParadoxIP150v2](https://github.com/Tertiush/ParadoxIP150v2) project, and changed to implement serial support. The changes were made in such a way that the communication method can be abstracted. I hope that the project can be merged.
+This is a fork of the [ParadoxIP150v2](https://github.com/Tertiush/ParadoxIP150v2) project, and changed to implement serial support. The changes were made in such a way that the communication method can be abstracted. I hope that the fork can be merged.
 
 As i do not have an IP150 module, help is welcome (and needed).
 
@@ -13,6 +13,7 @@ As i do not have an IP150 module, help is welcome (and needed).
 2.  Download the files in this repository and place it in some directory
 3.  Edit the config.ini file to match your setup
 4.  Run the script: Python Multi-MQTTv2.py
+
 
 ## What to expect:
 
@@ -24,3 +25,4 @@ The behaviour is similar to the one obtained with [ParadoxIP150v2](https://githu
 * Polling the serial port is now always done. This may help to discover connectivity losses.
 * Changed the logic so that it handles Paradox messages without the headers required by the connectivity module (Serial or IP150).
 * Abstracted the channel to a separate class.
+* A new config file option was added (SERIAL). See the example.

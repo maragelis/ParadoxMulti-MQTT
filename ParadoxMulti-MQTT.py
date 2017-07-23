@@ -154,6 +154,7 @@ def on_message(client, userdata, msg):
                 logger.exception("MQTT message received with incorrect structure")
 
 
+
 class CommSerial:
     comm = None
     
@@ -194,20 +195,13 @@ class CommSerial:
                     m += " %02x" % ord(c)
                 logger.debug(m)
 
-                #m = "Data IN  <- " + str(len(data)) + " -a- "                
-                #for c in data:
-                #    if ord(c) >= 32:
-                #        m += " "+c
-                #    else:
-                #        m += " ."
-                #logger.debug(m)
-
         return data
     def disconnect(self):
         self.comm.close()
         pass
 
 
+# To be implemented. Do dot have the hardware to proceed. 
 class CommIP150:
     def connect():
         pass
@@ -222,7 +216,7 @@ class CommIP150:
         pass
 
 
-class paradox:
+class Paradox:
     loggedin = 0
     aliveSeq = 0
     alarmName = None
@@ -644,7 +638,7 @@ if __name__ == '__main__':
                                "State Machine 2, Connected to Alarm, unlocking...",
                                0, True)
 
-                myAlarm = paradox(comms, 0, 3, Alarm_Event_Map, Alarm_Registry_Map)
+                myAlarm = Paradox(comms, 0, 3, Alarm_Event_Map, Alarm_Registry_Map)
 
                 if not myAlarm.login(passw, Debug_Mode):
                     logger.warning("Failed to login & unlock panel, check if another app is using the port. Retrying... ")

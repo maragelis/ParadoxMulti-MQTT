@@ -14,6 +14,8 @@ import serial
 import logging
 import re
 import json
+import socket
+import select
 
 Label_Regex = re.compile('[^a-zA-Z0-9\ \-]')
 
@@ -159,6 +161,18 @@ def on_message(client, userdata, msg):
             except:
                 logger.exception("MQTT message received with incorrect structure")
 
+        elif msg.topic.split("/")[-1] == "State":
+            if msg.payload.upper() == "NORMAL" and State_Machine == 20:
+                State_Machine = 2
+                logger.info("Switching to Standard mode")
+            elif msg.payload.upper() == "PASSTHROUGH":
+                State_Machine = 20
+                logger.info("Switching to Passthrough mode")
+            elif msg.payload.upper() == "RESET":
+                State_Machine = 1
+                logger.info("Reseting Paradox Multi MQTT")
+            else:
+                logger.warning("Unknown new state: %s", msg.payload)
 
 
 class CommSerial:
@@ -207,7 +221,12 @@ class CommSerial:
         return data
     def disconnect(self):
         self.comm.close()
-        pass
+        
+    def flush(self):
+        self.comm.flush()
+
+    def getfd(self):
+        return self.comm.fileno()
 
 
 # To be implemented. Do dot have the hardware to proceed. 
@@ -617,6 +636,46 @@ class Paradox:
             reply = self.readDataRaw(self.format37ByteMessage(message))
         return
 
+    def serialPassthrough(self):
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.setblocking(0)
+
+        try:
+            s.bind((Socket_Address, Socket_Port))
+            s.listen(10)
+        except socket.error as msg:
+            s.close()
+            s = None
+            logger.warning("Could not bind to socket %s:%s", Socket_Address, Socket_Port)
+            return
+        
+        while State_Machine == 20:
+            inputs = [self.comms.getfd()]
+
+            logger.debug("Passthrough: Waiting for client")
+            client = s.accept()
+
+            logger.debug("Passthrough: Client connected: %s", str(client))
+
+            inputs.append(client)
+
+            while State_Machine == 20:
+                readable, writable, exceptional = select.select(inputs, [] , inputs, 1)
+
+                for fin in readable:
+                    if fin == inputs[0]:
+                        client.send(self.comms.read())
+                    else:
+                        self.comms.write(client.recv())
+
+                for fex in exceptional:
+                    if fex == inputs[0]:
+                        logger.warning("Could not read from panel!")
+                        return
+                    else:
+                        logger.warning("Client closed connection")
+                        break;
+
 
 if __name__ == '__main__':
 
@@ -830,8 +889,15 @@ if __name__ == '__main__':
                     State_Machine -= 1
                     client.publish(Topic_Publish_AppState, "State Machine 4, Error, moving to previous state", 0, True)
                     attempts = 3
+        elif State_Machine == 20:
+            myAlarm.disconnect()
+            comms.flush()
+            myAlarm.serialPassthrough()
+            myAlarm.disconnect()
+
         elif State_Machine == 10:
             time.sleep(3)
 
         else:
             State_Machine = 2
+

@@ -12,8 +12,10 @@ import struct
 import importlib
 import serial
 import logging
+import re
+import json
 
-
+Label_Regex = re.compile('[^a-zA-Z0-9\ \-]')
 
 FORMAT = '%(asctime)-15s %(message)s'
 logging.basicConfig(format=FORMAT)
@@ -26,16 +28,18 @@ Zone_Amount = 32
 passw = "0000"
 user = "1000"
 
-SERIAL_PORT = "/dev/tty.usbserial"
+SERIAL_PORT = "/dev/ttyS1"
 
 MQTT_IP = "127.0.0.1"
 MQTT_Port = 1883
 MQTT_KeepAlive = 60  # Seconds
 
 # Options are Arm, Disarm, Stay, Sleep (case sensitive!)
+Topic_Publish_Battery = "Paradox/Voltage"
 Topic_Publish_Events = "Paradox/Events"
+Topic_Publish_Status = "Paradox/Status"
 Events_Payload_Numeric = False
-Topic_Subscribe_Control = "Paradox/C/" # e.g. To arm partition 1: Paradox/C/P1/Arm
+Topic_Subscribe_Control = "Paradox/Control/" # e.g. To arm partition 1: Paradox/C/P1/Arm
 Startup_Publish_All_Info = "True"
 Startup_Update_All_Labels = "True"
 Topic_Publish_Labels = "Paradox/Labels"
@@ -56,7 +60,11 @@ Output_PControl_Number = 0
 Output_PControl_NewState = ""
 State_Machine = 0
 Debug_Mode = 2
-Polling_Enabled = 30
+Poll_Speed = 1
+Debug_Packets = False
+Keep_Alive_Interval = 5
+
+Alarm_Data = {}
 
 def ConfigSectionMap(section):
     dict1 = {}
@@ -100,52 +108,50 @@ def on_message(client, userdata, msg):
 
 
     if Topic_Subscribe_Control in msg.topic:
-        if "/FO/" in msg.topic:
+        if "/Output/" in msg.topic:
             try:
-                Output_FControl_Number = int((topic.split(Topic_Subscribe_Control + 'FO/'))[1].split('/')[0])
-                logger.info("Output force control number: ", Output_FControl_Number)
-                try:
-                    Output_FControl_NewState = (topic.split('/FO/' + str(Output_FControl_Number) + '/'))[1]
-                except Exception, e:
-                    Output_FControl_NewState = msg.payload
-                    if len(Output_FControl_NewState) < 1:
-                        logger.warning('No payload given for control number: e.g. On')
-                logger.exception( "Output force control state: ", Output_FControl_NewState)
+                Output_FControl_Number = msg.topic.split("/")[-1]
+
+                logger.debug("Output force control number: ", Output_FControl_Number)
+                Output_FControl_NewState = msg.payload
+                if len(Output_FControl_NewState) == 0:
+                    logger.warning("No payload for output: e.g. On")
+                    return
+
+                logger.debug( "Output force control state: ", Output_FControl_NewState)
                 client.publish(Topic_Publish_AppState,
                                "Output: Forcing PGM " + str(Output_FControl_Number) + " to state: " + Output_FControl_NewState, 0, True)
                 Output_FControl_Action = 1
             except:
                 logger.exception("MQTT message received with incorrect structure")
 
-        elif "/PO/" in msg.topic:
+        elif "/Pulse/" in msg.topic:
             try:
-                Output_PControl_Number = int((topic.split(Topic_Subscribe_Control + 'PO/'))[1].split('/')[0])
+                Output_PControl_Number = msg.topic.split("/")[-1]
+
                 logger.debug("Output pulse control number: ", Output_PControl_Number)
-                try:
-                    Output_PControl_NewState = (topic.split('/PO/' + str(Output_PControl_Number) + '/'))[1]
-                except Exception, e:
-                    Output_PControl_NewState = msg.payload
-                    if len(Output_PControl_NewState) < 1:
-                        logger.warning('No payload given for control number: e.g. On')
-                logger.exception( "Output pulse control state: ", Output_PControl_NewState)
+                Output_PControl_NewState = msg.payload
+                if len(Output_PControl_NewState) == 0:
+                    logger.warning("No payload for output: e.g. On")
+                    return
+                
+                logger.debug( "Output pulse control state: ", Output_PControl_NewState)
                 client.publish(Topic_Publish_AppState,
                                "Output: Pulsing PGM " + str(Output_PControl_Number) + " to state: " + Output_PControl_NewState,
                                0, True)
                 Output_PControl_Action = 1
             except:
                 logger.exception("MQTT message received with incorrect structure")
-        elif "/P" in msg.topic:
+        elif "/Partition/" in msg.topic:
             try:
-                Alarm_Control_Partition = int((topic.split(Topic_Subscribe_Control + 'P'))[1].split('/')[0])
-                logger.info( "Alarm control partition: ", Alarm_Control_Partition)
-                try:
-                    Alarm_Control_NewState = (topic.split('/P' + str(Alarm_Control_Partition) + '/'))[1]
-                except Exception:
-                    Alarm_Control_NewState = msg.payload
-                    if len(Alarm_Control_NewState) < 1:
-                        logger.warning('No payload given for alarm control: e.g. Disarm')
+                Alarm_Control_Partition = topic.split("/")[-1]
+                logger.debug( "Alarm control partition: %s ", Alarm_Control_Partition)
+                Alarm_Control_NewState = msg.payload
+                if len(Alarm_Control_NewState) < 1:
+                    logger.warning('No payload given for alarm control: e.g. Disarm')
+                    return
 
-                logger.exception( "Alarm control state: ", Alarm_Control_NewState)
+                logger.debug( "Alarm control state: %s", Alarm_Control_NewState)
                 client.publish(Topic_Publish_AppState,
                                "Alarm: Control partition " + str(Alarm_Control_Partition) + " to state: " + Alarm_Control_NewState,
                                0, True)
@@ -162,7 +168,7 @@ class CommSerial:
         self.serialport = serialport
         self.comm = None
 
-    def connect(self, baud=9600, timeout=5):
+    def connect(self, baud=9600, timeout=1):
         try:
             logger.info( "Opening Serial port: " + self.serialport)
             self.comm = serial.Serial()
@@ -177,7 +183,7 @@ class CommSerial:
         return True
 
     def write(self, data):
-        if logger.isEnabledFor(logging.DEBUG):
+        if Debug_Packets and logger.isEnabledFor(logging.DEBUG):
             m = "Data OUT -> " + str(len(data)) + " -b- "
             for c in data:
                 m += " %02x" % ord(c)
@@ -185,9 +191,12 @@ class CommSerial:
 
         self.comm.write(data)
         
-    def read(self, sz = 37):
+    def read(self, sz=37, timeout=1):
+	self.comm.timeout = timeout
+
         data = self.comm.read(sz)
-        if logger.isEnabledFor(logging.DEBUG):
+
+        if Debug_Packets and logger.isEnabledFor(logging.DEBUG):
             if data is not None and len(data) > 0:
                 m = "Data IN  <- " + str(len(data)) + " -b- "                
 
@@ -218,7 +227,6 @@ class CommIP150:
 
 class Paradox:
     loggedin = 0
-    aliveSeq = 0
     alarmName = None
     zoneTotal = 0
     zoneStatus = ['']
@@ -321,6 +329,7 @@ class Paradox:
         return message
 
     def updateAllLabels(self, Startup_Publish_All_Info="True", Topic_Publish_Labels="True", Debug_Mode=0):
+        Alarm_Data['labels'] = dict()
 
         for func in self.registermap.getsupportedItems():
 
@@ -336,12 +345,8 @@ class Paradox:
                 logger.debug("Amount of numeric items in dictionary to read: " + str(total))
 
                 skip_next = 0
-
+                last_index = -1
                 for x in range(1, total + 1):
-
-                    if skip_next == 1:
-                        skip_next = 0
-                        continue
 
                     message = register_dict[x]["Send"]
                     try:
@@ -353,24 +358,28 @@ class Paradox:
                     message = message.ljust(36, '\x00')
 
                     reply = self.readDataRaw(self.format37ByteMessage(message), Debug_Mode)
+                    start = reply.find('\x00')
 
-                    start = register_dict[x]["Receive"]["Start"] - 16 ## TODO: Remove offset
-                    finish = register_dict[x]["Receive"]["Finish"] - 16
+                    if start == -1 or len(reply) < start + 19:
+                        logger.warning("Invalid message!")
+                        continue
 
-                    mapping_dict(x, reply[start:finish].rstrip().translate(None, '\x00'))
+                    if last_index == reply[start + 2]:
+                        start += 16
 
-                    if (skip_next == 0) and (message[0:len(next_message)] == next_message):
-                        start = register_dict[x + 1]["Receive"]["Start"] - 16
-                        finish = register_dict[x + 1]["Receive"]["Finish"] - 16
-                        mapping_dict(x + 1, reply[start:finish].rstrip().translate(None, '\x00'))
-                        skip_next = 1
+                    last_index = reply[start + 2]
 
+                    finish = start + 3 + 16
+                    label = reply[start + 3:finish].strip()
+                    mapping_dict(x, label)
                 try:
                     completed_dict = getattr(self.eventmap, "getAll" + func)()
                     if Debug_Mode >= 1:
                         logger.info("Labels detected for " + func + ": " + str(completed_dict))
                 except Exception, e:
                     logger.exception( "Failed to load supported function's completed mappings after updating: " + repr(e))
+                
+                Alarm_Data['labels'][func] = completed_dict
 
                 if Startup_Publish_All_Info == "True":
                     topic = func.split("Label")[0]
@@ -380,31 +389,42 @@ class Paradox:
 
             except Exception, e:
                 logger.exception( "Failed to load supported function's mapping: " + repr(e))
-
+        
         return
 
-    def testForEvents(self, Events_Payload_Numeric=0, Debug_Mode=0):
-        message = self.readDataRaw('', Debug_Mode)
-        if message is None or len(message) == 0:
+    def testForEvents(self, Events_Payload_Numeric=0, Debug_Mode=0, timeout=1):
+    
+        message = self.comms.read(timeout=0.01)
+        
+        if message is None or len(message) < 2:
             return None
 
         reply = '.'
-
-        logger.debug("Event data: " + " ".join(hex(ord(i)) for i in message).replace("0x",""))
 
         if len(message) > 0:
             if message[0] == '\xe2' or message[0] == '\xe0':
                 try:
 
-                    if Events_Payload_Numeric == "False":
-                        event, subevent = self.eventmap.getEventDescription(ord(message[7]), ord(message[8]))
-                        reply = "Event:" + event + ";SubEvent:" + subevent
-                    else:
-                        reply = "E:" + str(ord(message[7])) + ";SE:" + str(ord(message[8]))
+                    event, subevent = self.eventmap.getEventDescription(ord(message[7]), ord(message[8]))
+                    event = event.strip()
+                    subevent = subevent.strip()
+
+                    reply = json.dumps({"Event": event, "SubEvent":subevent})
+                    logger.info(reply)
 
                     client.publish(Topic_Publish_Events, reply, qos=0, retain=False)
-
-                    logger.debug("Reply: " + reply)
+                    if event.find("Zone ") == 0:
+                        client.publish(Topic_Publish_Status + "/Zones/"+subevent.replace(' ','_').title(), event, qos=0, retain=True)
+                    elif event == 'Partition status':
+                        client.publish(Topic_Publish_Status + "/Partitions/", subevent, qos=0, retain=True)
+                    elif event.find('Bell status ') == 0:
+                        client.publish(Topic_Publish_Status + "/Bell/", subevent, qos=0, retain=True)
+                    elif (event == "Non-reportable event" and subevent.find("arm") >= 0) or event == "Special arming":
+                        client.publish(Topic_Publish_Status + "/Partitions/", subevent, qos=0, retain=True)
+                    elif event == "Arming with user":
+                        client.publish(Topic_Publish_Status + "/Partitions/", event + " " +subevent, qos=0, retain=True)
+                    else:
+                        client.publish(Topic_Publish_Status + "/System/", event + " -> " + subevent, qos=0, retain=True)
 
                 except ValueError:
                     reply = "No register entry for Event: " + str(ord(message[7])) + ", Sub-Event: " + str(
@@ -419,7 +439,7 @@ class Paradox:
 
     def readDataRaw(self, request='', Debug_Mode=2):
 
-        # self.testForEvents()                # First check for any pending events received
+        self.testForEvents(timeout=0.01)                # First check for any pending events received
 
         tries = self.retries
 
@@ -428,7 +448,8 @@ class Paradox:
                 if len(request) > 0:
                     self.comms.write(request)
                 
-                inc_data = self.comms.read(37)
+                inc_data = self.comms.read()
+                
                 if inc_data is None:
                     if tries > 0:
                         logger.warning("Error reading data from panel, retrying again... (" + str(tries) + ")")
@@ -451,29 +472,49 @@ class Paradox:
         rawdata = self.readDataRaw(inputData, Debug_Mode)
         return rawdata
 
-    def controlGenericOutput(self, mapping_dict, output, state, Debug_Mode=0):
+    def controlGenericOutput(self, mapping_dict, outputs, state, Debug_Mode=0):
 
         registers = mapping_dict
+        if outputs == "ALL":
+            outputs = range(1, 1 + len(Alarm_Data['labels']['outputLabel']))
+        else:
+            outputs = [output]
 
-        logger.info("Sending generic Output Control: Output: " + str(output) + ", State: " + state)
+        logger.info("Sending generic Output Control: Output: " + str(outputs) + ", State: " + state)
 
-        message = registers[output][state]
+        for output in outputs:
 
-        assert isinstance(message, basestring), "Message to be sent is not a string: %r" % message
-        message = message.ljust(36, '\x00')
+            message = registers[output][state]
 
-        reply = self.readDataRaw(self.format37ByteMessage(message), Debug_Mode)
+            if not isinstance(message, basestring):
+                logger.warning("Generic Output: Message to be sent is not a string: %r" % message)
+                continue
+
+            message = message.ljust(36, '\x00')
+
+            reply = self.readDataRaw(self.format37ByteMessage(message), Debug_Mode)
 
         return
 
     def controlPGM(self, pgm, state="OFF", Debug_Mode=0):
+        if pgm == "ALL":
+            pgms = range(0, 17)
+        else:
+            if not isinstance(pgm, int) or not (pgm >= 0 and pgm <= 16):
+                logger.warning("Problem with PGM number: %r" % str(pgm))
+                return
+            pgms = [pgm]
 
-        assert (isinstance(pgm, int) and pgm >= 0 and pgm <= 16), "Problem with PGM number: %r" % str(pgm)
-        assert (isinstance(pgm, int) and pgm >= 0 and pgm <= 16), "Problem with PGM number: %r" % str(pgm)
-        assert isinstance(state, basestring), "State given is not a string: %r" % str(state)
-        assert (state.upper() == "ON" or state.upper() == "OFF"), "State is not given correctly: %r" % str(state)
+        if not isinstance(state, basestring):
+            logger.warning("PGM State given is not a string: %r" % str(state))
+            return
 
-        self.controlGenericOutput(self.registermap.getcontrolOutputRegister(), pgm, state.upper(), Debug_Mode)
+        if not state in ["ON", "1", "TRUE", "ENABLE", "OFF", "FALSE", "0", "DISABLE"]:
+            logger.warning("PGM State is not given correctly: %r" % str(state))
+            return
+
+        for p in pgms:
+            self.controlGenericOutput(self.registermap.getcontrolOutputRegister(), p, state, Debug_Mode)
 
         return
 
@@ -481,45 +522,81 @@ class Paradox:
         registers = mapping_dict
 
         logger.info("Sending generic Alarm Control: Partition: " + str(partition) + ", State: " + state)
+        if partition == "ALL":
+            partition = range(1, 1 + len(Alarm_Data['labels']['partitionLabel']))
+        else:
+            partition = [partition]
 
-        message = registers[partition][state]
+        for p in partition:
+            message = registers[p][state]
 
-        assert isinstance(message, basestring), "Message to be sent is not a string: %r" % message
-        message = message.ljust(36, '\x00')
+            message = message.ljust(36, '\x00')
 
-        reply = self.readDataRaw(self.format37ByteMessage(message), Debug_Mode)
+            reply = self.readDataRaw(self.format37ByteMessage(message), Debug_Mode)
 
         return
 
     def controlAlarm(self, partition=1, state="Disarm", Debug_Mode=0):
 
-        assert (
-            isinstance(partition,
-                       int) and partition >= 0 and partition <= 16), "Problem with partition number: %r" % str(
-            partition)
-        assert isinstance(state, basestring), "State given is not a string: %r" % str(state)
-        assert (state.upper() in self.registermap.getcontrolAlarmRegister()[
-            partition]), "State is not given correctly: %r" % str(state)
+            
+        if not isinstance(state, basestring):
+            logger.warning("State given is not a string: %r" % str(state))
+            return
+    
+        if partition.upper() == "ALL":
+            logger.debug("Setting ALL Partitions")
+            if not(state.upper() in self.registermap.getcontrolAlarmRegister()[Alarm_Data['labels']['partitionLabel'].keys()[0]]):
+                logger.warning("State is not given correctly: %r" % str(state))
+                return
+        elif  isinstance(partition, int):
+            if not (partition >= 0 and partition <= 16):
+                logger.warning("Problem with partition number: %r" % str(partition))
+                return
+            if not(state.upper() in self.registermap.getcontrolAlarmRegister()[partition]):
+                logger.warning("State is not given correctly: %r" % str(state))
+                return
 
-        self.controlGenericAlarm(self.registermap.getcontrolAlarmRegister(), partition, state.upper(), Debug_Mode)
+        self.controlGenericAlarm(self.registermap.getcontrolAlarmRegister(), partition.upper(), state.upper(), Debug_Mode)
 
         return
 
     def disconnect(self, Debug_Mode=0):
+        message = "\x70\x00\x05\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x76"
+        self.readDataRaw(self.format37ByteMessage(message))
+
         self.comms.disconnect()
 
 
     def keepAlive(self, Debug_Mode=0):
+        aliveSeq = 0
 
-        message = "\x50\x00\x80"
-        message += bytes(bytearray([self.aliveSeq]))
-        message += "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+        while aliveSeq < 7:
+            message = "\x50\x00\x80"
+            message += bytes(bytearray([aliveSeq]))
+            message += "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
 
-        self.readDataRaw(self.format37ByteMessage(message))
-        self.aliveSeq += 1
-        if self.aliveSeq > 6:
-            self.aliveSeq = 0
+            data = self.readDataRaw(self.format37ByteMessage(message))
+            if aliveSeq == 0:
+                Alarm_Data['date_time'] = {"year": ord(data[9])*100 + ord(data[10]),
+                        "month": ord(data[11]),
+                        "day": ord(data[12]),
+                        "hours": ord(data[13]),
+                        "minutes": ord(data[14])}
+            
+                voltage =   {'vdc': round(ord(data[15])*(20.3-1.4)/255.0+1.4,1) , 
+                            'dc': round(ord(data[16])*22.8/255.0,1),
+                            'battery': round(ord(data[17])*22.8/255.0,1)}
+                if not 'voltage' in Alarm_Data.keys() or \
+                    voltage['vdc'] != Alarm_Data['voltage']['vdc'] or voltage['dc'] != Alarm_Data['voltage']['dc'] or voltage['battery'] != Alarm_Data['voltage']['battery']:
+                
+                    client.publish(Topic_Publish_Battery, json.dumps(voltage))
+                    Alarm_Data['voltage'] = voltage
+            
+            elif aliveSeq == 1:
+                pass
 
+            aliveSeq += 1
+        
     def walker(self, ):
         self.zoneTotal = Zone_Amount
 
@@ -545,6 +622,7 @@ if __name__ == '__main__':
 
     State_Machine = 0
     attempts = 3
+    lastKeepAlive = 0
 
     while True:
 
@@ -613,7 +691,7 @@ if __name__ == '__main__':
             except Exception, e:
 
                 logger.exception( "MQTT connection error (" + str(attempts) + ": " + repr(e))
-                time.sleep(attemps * 2)
+                time.sleep(attempts * 2)
                 attempts -= 1
 
                 if attempts < 1:
@@ -626,7 +704,6 @@ if __name__ == '__main__':
         elif State_Machine == 2:
 
             try:
-
                 client.publish(Topic_Publish_AppState, "State Machine 2, Connecting to Alarm...", 0, True)
 
                 comms = CommSerial(SERIAL_PORT)
@@ -643,16 +720,16 @@ if __name__ == '__main__':
                 if not myAlarm.login(passw, Debug_Mode):
                     logger.warning("Failed to login & unlock panel, check if another app is using the port. Retrying... ")
                     client.publish(Topic_Publish_AppState,
-                                   "State Machine 2, Failed to login & unlock to IP module, check if another app is using the port. Retrying... ",
+                                   "State Machine 2, Failed to login & unlock panel, check if another app is using the port. Retrying... ",
                                    0, True)
                     comms.close()
                     time.sleep(Poll_Speed * 20)
                 else:
-                    client.publish(Topic_Publish_AppState, "State Machine 2, Logged into IP Module successfully", 0, True)
+                    client.publish(Topic_Publish_AppState, "State Machine 2, Logged into panel successfully", 0, True)
                     State_Machine += 1
 
             except Exception, e:
-                logger.exception("Error attempting connection to IP module (" + str(attempts) + ": " + repr(e))
+                logger.exception("Error attempting connection to panel (" + str(attempts) + ": " + repr(e))
                 client.publish(Topic_Publish_AppState,
                                "State Machine 2, Exception, retrying... (" + str(attempts) + ": " + repr(e),
                                0, True)
@@ -718,7 +795,7 @@ if __name__ == '__main__':
                 # Test for pending Force Output Control
                 if Output_FControl_Action == 1:
                     myAlarm.login(passw)
-                    myAlarm.controlPGM(Output_FControl_Number, Output_FControl_NewState, Debug_Mode)
+                    myAlarm.controlPGM(Output_FControl_Number, Output_FControl_NewState.upper(), Debug_Mode)
                     Output_FControl_Action = 0
                     logger.info("Listening for events...")
                     client.publish(Topic_Publish_AppState, "State Machine 4, Listening for events...", 0, True)
@@ -726,9 +803,9 @@ if __name__ == '__main__':
                 # Test for pending Pulse Output Control
                 if Output_PControl_Action == 1:
                     myAlarm.login(passw)
-                    myAlarm.controlPGM(Output_PControl_Number, Output_PControl_NewState, Debug_Mode)
+                    myAlarm.controlPGM(Output_PControl_Number, Output_PControl_NewState.upper(), Debug_Mode)
                     time.sleep(0.5)
-                    if Output_PControl_NewState.upper() == "ON":
+                    if Output_PControl_NewState.upper() in ["ON", "1", "TRUE", "ENABLE"]:
                         myAlarm.controlPGM(Output_PControl_Number, "OFF", Debug_Mode)
                     else:
                         myAlarm.controlPGM(Output_PControl_Number, "ON", Debug_Mode)
@@ -736,10 +813,10 @@ if __name__ == '__main__':
                     Output_PControl_Action = 0
                     logger.info("Listening for events...")
                     client.publish(Topic_Publish_AppState, "State Machine 4, Listening for events...", 0, True)
-
-                time.sleep(Polling_Enabled)
-
-                myAlarm.keepAlive(Debug_Mode)
+                
+                if time.time() > lastKeepAlive + Keep_Alive_Interval:
+                    myAlarm.keepAlive(Debug_Mode)
+                    lastKeepAlive = time.time()
 
             except Exception, e:
 

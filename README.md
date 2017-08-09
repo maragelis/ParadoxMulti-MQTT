@@ -4,12 +4,13 @@ Currently access through the Serial port is implemented. As this a fork of the [
 
 While I would welcome a merge with the origin project, the changes are substantial and I do not guarantee future compatibility.
 
-Tested with the following environment:
+Tested in the following environment:
 
 * Python 2.7.13 
 * [Mosquitto MQTT Broker v1.4.14](http://mosquitto.org)
 * [OrangePi 2G-IOT](http://www.orangepi.org/OrangePi2GIOT/) through its internal Serial Port
 * Ubuntu Server 16.04.3 LTS
+* Paradox MG5050 panel
 
 ## Steps to use it:
 1.  Download the files in this repository and place it in some directory

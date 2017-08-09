@@ -649,6 +649,7 @@ class Paradox:
         try:
             s.bind((Socket_Address, Socket_Port))
             s.listen(10)
+            s.setdefaulttimeout(5)
         except socket.error as msg:
             s.close()
             s = None
@@ -660,14 +661,18 @@ class Paradox:
             inputs = [self.comms.getfd()]
 
             logger.debug("Passthrough: Waiting for client")
-            client = s.accept()
+            while self.mode == 1:
+                try:
+                    client = s.accept()
+                except socket.timeout:
+                    pass
 
             logger.debug("Passthrough: Client connected: %s", str(client))
 
             inputs.append(client)
 
             while self.mode == 1:
-                readable, writable, exceptional = select.select(inputs, [] , inputs, 1)
+                readable, writable, exceptional = select.select(inputs, [] , inputs, 5)
 
                 for fin in readable:
                     if fin == inputs[0]:

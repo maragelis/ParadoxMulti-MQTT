@@ -903,6 +903,7 @@ if __name__ == '__main__':
 
         elif State_Machine == 20:
             myAlarm.disconnect()
+            comms.connect()
             comms.flush()
             myAlarm.serialPassthrough()
             myAlarm.disconnect()

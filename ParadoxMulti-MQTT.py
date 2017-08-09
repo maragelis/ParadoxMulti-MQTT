@@ -49,6 +49,8 @@ Topic_Publish_AppState = "Paradox/State"
 Alarm_Model = "ParadoxMG5050"
 Alarm_Registry_Map = "ParadoxMG5050"
 Alarm_Event_Map = "ParadoxMG5050"
+Socket_Address = "0.0.0.0"
+Socket_Port = 2000
 
 # Global variables
 Alarm_Control_Action = 0
@@ -166,7 +168,7 @@ def on_message(client, userdata, msg):
         elif msg.topic.split("/")[-1] == "State":
             if msg.payload.upper() == "NORMAL" and State_Machine == 20:
                 if myAlarm is not None:
-                    myAlarm.mode(0)
+                    myAlarm.stopSerialPassthrough()
 
                 logger.info("Switching to Standard mode")
             elif msg.payload.upper() == "PASSTHROUGH":
@@ -643,13 +645,16 @@ class Paradox:
         return
 
     def startSerialPassthrough(self):
+
+        self.comms.connect()
+
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.setblocking(0)
 
         try:
             s.bind((Socket_Address, Socket_Port))
             s.listen(10)
-            s.setdefaulttimeout(5)
+            s.settimeout(5)
         except socket.error as msg:
             s.close()
             s = None
@@ -661,13 +666,15 @@ class Paradox:
             inputs = [self.comms.getfd()]
 
             logger.debug("Passthrough: Waiting for client")
+            client = None
+
             while self.mode == 1:
                 try:
                     client = s.accept()
+                    logger.debug("Passthrough: Client connected: %s", str(client))
                 except socket.timeout:
                     pass
 
-            logger.debug("Passthrough: Client connected: %s", str(client))
 
             inputs.append(client)
 
@@ -687,9 +694,12 @@ class Paradox:
                     else:
                         logger.warning("Client closed connection")
                         break;
+            if client is not None:
+                client.close()
+        self.comms.disconnect()
 
-        def stopSerialPassthrough(self):
-            self.mode = 0
+    def stopSerialPassthrough(self):
+        self.mode = 0
 
 
 if __name__ == '__main__':
@@ -903,10 +913,8 @@ if __name__ == '__main__':
 
         elif State_Machine == 20:
             myAlarm.disconnect()
-            comms.connect()
-            comms.flush()
-            myAlarm.serialPassthrough()
-            myAlarm.disconnect()
+            myAlarm.startSerialPassthrough()
+            State_Machine = 1
 
         elif State_Machine == 10:
             time.sleep(3)

@@ -169,7 +169,7 @@ def on_message(client, userdata, msg):
                 State_Machine = 20
                 logger.info("Switching to Passthrough mode")
             elif msg.payload.upper() == "RESET":
-                State_Machine = 1
+                State_Machine = 0
                 logger.info("Reseting Paradox Multi MQTT")
             else:
                 logger.warning("Unknown new state: %s", msg.payload)
@@ -679,7 +679,6 @@ class Paradox:
 
 if __name__ == '__main__':
 
-    State_Machine = 0
     attempts = 3
     lastKeepAlive = 0
 
@@ -845,7 +844,6 @@ if __name__ == '__main__':
 
                 # Test for pending Alarm Control
                 if Alarm_Control_Action == 1:
-                    myAlarm.login(passw)
                     myAlarm.controlAlarm(Alarm_Control_Partition, Alarm_Control_NewState, Debug_Mode)
                     Alarm_Control_Action = 0
                     logger.info( "Listening for events...")
@@ -853,7 +851,6 @@ if __name__ == '__main__':
 
                 # Test for pending Force Output Control
                 if Output_FControl_Action == 1:
-                    myAlarm.login(passw)
                     myAlarm.controlPGM(Output_FControl_Number, Output_FControl_NewState.upper(), Debug_Mode)
                     Output_FControl_Action = 0
                     logger.info("Listening for events...")
@@ -861,7 +858,6 @@ if __name__ == '__main__':
 
                 # Test for pending Pulse Output Control
                 if Output_PControl_Action == 1:
-                    myAlarm.login(passw)
                     myAlarm.controlPGM(Output_PControl_Number, Output_PControl_NewState.upper(), Debug_Mode)
                     time.sleep(0.5)
                     if Output_PControl_NewState.upper() in ["ON", "1", "TRUE", "ENABLE"]:

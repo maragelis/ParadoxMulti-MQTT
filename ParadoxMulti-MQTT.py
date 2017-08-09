@@ -423,7 +423,7 @@ class Paradox:
     
         message = self.comms.read(timeout=0.01)
         
-        if message is None or len(message) < 2:
+        if message is None or len(message) < 9:
             return None
 
         reply = '.'

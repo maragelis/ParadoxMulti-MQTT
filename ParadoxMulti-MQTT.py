@@ -67,6 +67,7 @@ Debug_Packets = False
 Keep_Alive_Interval = 5
 
 Alarm_Data = {}
+myAlarm = None
 
 def ConfigSectionMap(section):
     dict1 = {}
@@ -101,6 +102,7 @@ def on_message(client, userdata, msg):
     global Output_PControl_Number
     global Output_PControl_NewState
     global Output_PControl_Action
+    global State_Machine
 
     valid_states = ['Arm', 'Disarm', 'Sleep', 'Stay']
 
@@ -163,7 +165,9 @@ def on_message(client, userdata, msg):
 
         elif msg.topic.split("/")[-1] == "State":
             if msg.payload.upper() == "NORMAL" and State_Machine == 20:
-                State_Machine = 2
+                if myAlarm is not None:
+                    myAlarm.mode(0)
+
                 logger.info("Switching to Standard mode")
             elif msg.payload.upper() == "PASSTHROUGH":
                 State_Machine = 20
@@ -254,6 +258,7 @@ class Paradox:
     partitionStatus = None
     partitionName = None
     Skip_Update_Labels = 0
+    mode = 0
 
     def __init__(self, _transport, _encrypted=0, _retries=3, _alarmeventmap="ParadoxMG5050",
                  _alarmregmap="ParadoxMG5050"):
@@ -262,6 +267,7 @@ class Paradox:
         self.encrypted = _encrypted
         self.alarmeventmap = _alarmeventmap
         self.alarmregmap = _alarmregmap
+        self.mode = 0
 
         # MyClass = getattr(importlib.import_module("." + self.alarmmodel + "EventMap", __name__))
 
@@ -636,7 +642,7 @@ class Paradox:
             reply = self.readDataRaw(self.format37ByteMessage(message))
         return
 
-    def serialPassthrough(self):
+    def startSerialPassthrough(self):
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.setblocking(0)
 
@@ -648,8 +654,9 @@ class Paradox:
             s = None
             logger.warning("Could not bind to socket %s:%s", Socket_Address, Socket_Port)
             return
-        
-        while State_Machine == 20:
+        self.mode = 1
+
+        while self.mode == 1:
             inputs = [self.comms.getfd()]
 
             logger.debug("Passthrough: Waiting for client")
@@ -659,7 +666,7 @@ class Paradox:
 
             inputs.append(client)
 
-            while State_Machine == 20:
+            while self.mode == 1:
                 readable, writable, exceptional = select.select(inputs, [] , inputs, 1)
 
                 for fin in readable:
@@ -675,6 +682,9 @@ class Paradox:
                     else:
                         logger.warning("Client closed connection")
                         break;
+
+        def stopSerialPassthrough(self):
+            self.mode = 0
 
 
 if __name__ == '__main__':
@@ -885,6 +895,7 @@ if __name__ == '__main__':
                     State_Machine -= 1
                     client.publish(Topic_Publish_AppState, "State Machine 4, Error, moving to previous state", 0, True)
                     attempts = 3
+
         elif State_Machine == 20:
             myAlarm.disconnect()
             comms.flush()

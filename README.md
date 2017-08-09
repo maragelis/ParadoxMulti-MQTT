@@ -1,24 +1,27 @@
 # Paradox Multi-MQTT
 Python-based 'middleware' that aims to use any method to connect to a Paradox Alarm, exposing the interface for monitoring and control via an MQTT Broker.
-Currently access through the Serial port is implemented. As this a fork of the [ParadoxIP150v2](https://github.com/Tertiush/ParadoxIP150v2) project, access through the IP150 can be easily (re-)added (volunteers wanted)
+Currently access through the Serial port is implemented. As this a fork of the [ParadoxIP150v2](https://github.com/Tertiush/ParadoxIP150v2) project, access through the IP150 can be easily (re-)added (volunteers wanted). As I do not have access to the module, it is impossible for me to test it.
 
-As i do not have an IP150 module, help is welcome (and needed).
+While I would welcome a merge with the origin project, the changes are substantial and I do not guarantee future compatibility.
 
-While I would welcome a merge with the origin module, the changes are substantial, and this project is following its own route.
+Tested with the following environment:
+
+* Python 2.7.13 
+* [Mosquitto MQTT Broker v1.4.14](http://mosquitto.org)
+* [OrangePi 2G-IOT](http://www.orangepi.org/OrangePi2GIOT/) through its internal Serial Port
+* Ubuntu Server 16.04.3 LTS
 
 ## Steps to use it:
-1.  Tested with Python 2.7.13 & [Mosquitto MQTT Broker v1.4.14](http://mosquitto.org)
-2.  Download the files in this repository and place it in some directory
-3.  Edit the config.ini file to match your setup
-4.  Run the script: Python Multi-MQTTv2.py
+1.  Download the files in this repository and place it in some directory
+2.  Edit the config.ini file to match your setup
+3.  Run the script: Python Multi-MQTTv2.py
 
 
 ## What to expect:
 
-The behaviour is similar to the one obtained with [ParadoxIP150v2](https://github.com/Tertiush/ParadoxIP150v2), __but there are some changes__. Please check the project documentation.
+The behaviour is similar to the one obtained with [ParadoxIP150v2](https://github.com/Tertiush/ParadoxIP150v2), __but there are some RELEVANT changes__. Please check this project documentation.
 
 ## Changes from the original project
-
 * Using a python logging module, instead of print
 * Polling the serial port is now always done. This may help to discover connectivity losses and will allow to obtain some stats (battery, and eventually zones)
 * Changed the logic so that it handles Paradox messages without the headers required by the connectivity module (Serial or IP150).

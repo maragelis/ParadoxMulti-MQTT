@@ -66,10 +66,10 @@ State_Machine = 0
 Debug_Mode = 2
 Poll_Speed = 1
 Debug_Packets = False
-Keep_Alive_Interval = 5
+Keep_Alive_Interval = 2
 
-Alarm_Data = {}
-myAlarm = None
+alarm_data = {}
+my_alarm = None
 
 def ConfigSectionMap(section):
     dict1 = {}
@@ -105,6 +105,7 @@ def on_message(client, userdata, msg):
     global Output_PControl_NewState
     global Output_PControl_Action
     global State_Machine
+    global my_alarm
 
     valid_states = ['Arm', 'Disarm', 'Sleep', 'Stay']
 
@@ -119,7 +120,7 @@ def on_message(client, userdata, msg):
                 Output_FControl_Number = msg.topic.split("/")[-1]
 
                 logger.debug("Output force control number: ", Output_FControl_Number)
-                Output_FControl_NewState = msg.payload
+                Output_FControl_NewState = msg.payload.strip()
                 if len(Output_FControl_NewState) == 0:
                     logger.warning("No payload for output: e.g. On")
                     return
@@ -136,7 +137,7 @@ def on_message(client, userdata, msg):
                 Output_PControl_Number = msg.topic.split("/")[-1]
 
                 logger.debug("Output pulse control number: ", Output_PControl_Number)
-                Output_PControl_NewState = msg.payload
+                Output_PControl_NewState = msg.payload.strip()
                 if len(Output_PControl_NewState) == 0:
                     logger.warning("No payload for output: e.g. On")
                     return
@@ -152,7 +153,7 @@ def on_message(client, userdata, msg):
             try:
                 Alarm_Control_Partition = topic.split("/")[-1]
                 logger.debug( "Alarm control partition: %s ", Alarm_Control_Partition)
-                Alarm_Control_NewState = msg.payload
+                Alarm_Control_NewState = msg.payload.strip()
                 if len(Alarm_Control_NewState) < 1:
                     logger.warning('No payload given for alarm control: e.g. Disarm')
                     return
@@ -167,8 +168,8 @@ def on_message(client, userdata, msg):
 
         elif msg.topic.split("/")[-1] == "State":
             if msg.payload.upper() == "NORMAL" and State_Machine == 20:
-                if myAlarm is not None:
-                    myAlarm.stopSerialPassthrough()
+                if my_alarm is not None:
+                    my_alarm.stopSerialPassthrough()
 
                 logger.info("Switching to Standard mode")
             elif msg.payload.upper() == "PASSTHROUGH":
@@ -356,7 +357,7 @@ class Paradox:
         return message
 
     def updateAllLabels(self, Startup_Publish_All_Info="True", Topic_Publish_Labels="True", Debug_Mode=0):
-        Alarm_Data['labels'] = dict()
+        alarm_data['labels'] = dict()
 
         for func in self.registermap.getsupportedItems():
 
@@ -406,7 +407,9 @@ class Paradox:
                 except Exception, e:
                     logger.exception( "Failed to load supported function's completed mappings after updating: " + repr(e))
                 
-                Alarm_Data['labels'][func] = completed_dict
+
+                alarm_data['labels'][func] = completed_dict
+                alarm_data[func.replace('Label', '')] = [-1] * len(alarm_data['labels'][func])
 
                 if Startup_Publish_All_Info == "True":
                     topic = func.split("Label")[0]
@@ -421,7 +424,7 @@ class Paradox:
 
     def testForEvents(self, Events_Payload_Numeric=0, Debug_Mode=0, timeout=1):
     
-        message = self.comms.read(timeout=0.01)
+        message = self.comms.read(timeout=timeout)
         
         if message is None or len(message) < 9:
             return None
@@ -431,27 +434,22 @@ class Paradox:
         if len(message) > 0:
             if message[0] == '\xe2' or message[0] == '\xe0':
                 try:
-
                     event, subevent = self.eventmap.getEventDescription(ord(message[7]), ord(message[8]))
                     event = event.strip()
                     subevent = subevent.strip()
 
                     reply = json.dumps({"Event": event, "SubEvent":subevent})
                     logger.info(reply)
-
-                    client.publish(Topic_Publish_Events, reply, qos=0, retain=False)
+                    
+                    client.publish(Topic_Publish_Events, reply, qos=0, retain=True)
                     if event.find("Zone ") == 0:
-                        client.publish(Topic_Publish_Status + "/Zones/"+subevent.replace(' ','_').title(), event, qos=0, retain=True)
+                        client.publish(Topic_Publish_Status + "/Zones/"+subevent.replace(' ','_').title(), event, qos=1, retain=True)
                     elif event == 'Partition status':
-                        client.publish(Topic_Publish_Status + "/Partitions/", subevent, qos=0, retain=True)
-                    elif event.find('Bell status ') == 0:
-                        client.publish(Topic_Publish_Status + "/Bell/", subevent, qos=0, retain=True)
-                    elif (event == "Non-reportable event" and subevent.find("arm") >= 0) or event == "Special arming":
-                        client.publish(Topic_Publish_Status + "/Partitions/", subevent, qos=0, retain=True)
-                    elif event == "Arming with user":
-                        client.publish(Topic_Publish_Status + "/Partitions/", event + " " +subevent, qos=0, retain=True)
-                    else:
-                        client.publish(Topic_Publish_Status + "/System/", event + " -> " + subevent, qos=0, retain=True)
+                        se = ord(message[8])
+                        if se in [2, 3, 4, 5, 6, 7, 11, 12]:
+                            client.publish(Topic_Publish_Status + "/Partitions/", subevent, qos=1, retain=True)
+                    elif ord(message[7]) in [29, 30, 31, 32, 33, 40, 44, 45] :
+                        client.publish(Topic_Publish_Status + "/System/", event + " -> " + subevent, qos=1, retain=True)
 
                 except ValueError:
                     reply = "No register entry for Event: " + str(ord(message[7])) + ", Sub-Event: " + str(
@@ -464,9 +462,10 @@ class Paradox:
 
         return reply
 
-    def readDataRaw(self, request='', Debug_Mode=2):
+    def readDataRaw(self, request='', Debug_Mode=2, testForEvents=False):
 
-        self.testForEvents(timeout=0.01)                # First check for any pending events received
+        if testForEvents:
+            self.testForEvents(timeout=0.1)                # First check for any pending events received
 
         tries = self.retries
 
@@ -503,7 +502,7 @@ class Paradox:
 
         registers = mapping_dict
         if outputs == "ALL":
-            outputs = range(1, 1 + len(Alarm_Data['labels']['outputLabel']))
+            outputs = range(1, 1 + len(alarm_data['labels']['outputLabel']))
         else:
             outputs = [output]
 
@@ -549,12 +548,19 @@ class Paradox:
         registers = mapping_dict
 
         logger.info("Sending generic Alarm Control: Partition: " + str(partition) + ", State: " + state)
-        if partition == "ALL":
-            partition = range(1, 1 + len(Alarm_Data['labels']['partitionLabel']))
-        else:
-            partition = [partition]
 
+        if partition == "ALL":
+            partition = range(1, 1 + len(alarm_data['labels']['partitionLabel']))
+        elif isinstance(partition, int):
+            partition = [partition]
+        
         for p in partition:
+            
+            p = int(p)
+            if p not in registers.keys():
+                logger.warning("Invalid partition: %d", p)
+                continue
+    
             message = registers[p][state]
 
             message = message.ljust(36, '\x00')
@@ -572,7 +578,7 @@ class Paradox:
     
         if partition.upper() == "ALL":
             logger.debug("Setting ALL Partitions")
-            if not(state.upper() in self.registermap.getcontrolAlarmRegister()[Alarm_Data['labels']['partitionLabel'].keys()[0]]):
+            if not(state.upper() in self.registermap.getcontrolAlarmRegister()[alarm_data['labels']['partitionLabel'].keys()[0]]):
                 logger.warning("State is not given correctly: %r" % str(state))
                 return
         elif  isinstance(partition, int):
@@ -595,16 +601,20 @@ class Paradox:
 
 
     def keepAlive(self, Debug_Mode=0):
-        aliveSeq = 0
+    
+        global alarm_data
 
-        while aliveSeq < 7:
+        alive_sequence_number = 0
+    
+        while alive_sequence_number < 2:
             message = "\x50\x00\x80"
-            message += bytes(bytearray([aliveSeq]))
+            message += bytes(bytearray([alive_sequence_number]))
             message += "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
 
-            data = self.readDataRaw(self.format37ByteMessage(message))
-            if aliveSeq == 0:
-                Alarm_Data['date_time'] = {"year": ord(data[9])*100 + ord(data[10]),
+            data = self.readDataRaw(self.format37ByteMessage(message), testForEvents=True)
+
+            if alive_sequence_number == 0:
+                alarm_data['date_time'] = {"year": ord(data[9])*100 + ord(data[10]),
                         "month": ord(data[11]),
                         "day": ord(data[12]),
                         "hours": ord(data[13]),
@@ -613,16 +623,29 @@ class Paradox:
                 voltage =   {'vdc': round(ord(data[15])*(20.3-1.4)/255.0+1.4,1) , 
                             'dc': round(ord(data[16])*22.8/255.0,1),
                             'battery': round(ord(data[17])*22.8/255.0,1)}
-                if not 'voltage' in Alarm_Data.keys() or \
-                    voltage['vdc'] != Alarm_Data['voltage']['vdc'] or voltage['dc'] != Alarm_Data['voltage']['dc'] or voltage['battery'] != Alarm_Data['voltage']['battery']:
+
+                if not 'voltage' in alarm_data.keys() or \
+                    voltage['vdc'] != alarm_data['voltage']['vdc'] or voltage['dc'] != alarm_data['voltage']['dc'] or voltage['battery'] != alarm_data['voltage']['battery']:
                 
                     client.publish(Topic_Publish_Battery, json.dumps(voltage))
-                    Alarm_Data['voltage'] = voltage
-            
-            elif aliveSeq == 1:
-                pass
+                    alarm_data['voltage'] = v
 
-            aliveSeq += 1
+
+                num_zones = len(alarm_data['zone'])
+                if 99 in alarm_data['labels']['zoneLabel'].keys():
+                    num_zones -= 1
+
+                for i in range(0, num_zones):
+                    state = (ord(data[19 + i / 8]) >> (i % 8)) & 0x01
+                    if alarm_data['zone'][i] != state:
+                        #print("Zone %s changed to %d " % (alarm_data['labels']['zoneLabel'][i + 1], state))
+                        alarm_data['zone'][i] = state
+                        if state == 1:
+                            client.publish(Topic_Publish_Status+"/Zones/"+alarm_data['labels']['zoneLabel'][i + 1], "Zone open", retain=True)
+                        else:
+                            client.publish(Topic_Publish_Status+"/Zones/"+alarm_data['labels']['zoneLabel'][i + 1], "Zone closed", retain=True)
+
+            alive_sequence_number += 1
         
     def walker(self, ):
         self.zoneTotal = Zone_Amount
@@ -686,7 +709,7 @@ class Paradox:
                         client.send(self.comms.read())
                     else:
                         self.comms.write(client.recv())
-
+                sys.stdout.write(".")
                 for fex in exceptional:
                     if fex == inputs[0]:
                         logger.warning("Could not read from panel!")
@@ -694,8 +717,8 @@ class Paradox:
                     else:
                         logger.warning("Client closed connection")
                         break;
-            if client is not None:
-                client.close()
+            #if client is not None:
+            #    client.close()
         self.comms.disconnect()
 
     def stopSerialPassthrough(self):
@@ -798,9 +821,9 @@ if __name__ == '__main__':
                                "State Machine 2, Connected to Alarm, unlocking...",
                                0, True)
 
-                myAlarm = Paradox(comms, 0, 3, Alarm_Event_Map, Alarm_Registry_Map)
+                my_alarm = Paradox(comms, 0, 3, Alarm_Event_Map, Alarm_Registry_Map)
 
-                if not myAlarm.login(passw, Debug_Mode):
+                if not my_alarm.login(passw, Debug_Mode):
                     logger.warning("Failed to login & unlock panel, check if another app is using the port. Retrying... ")
                     client.publish(Topic_Publish_AppState,
                                    "State Machine 2, Failed to login & unlock panel, check if another app is using the port. Retrying... ",
@@ -830,12 +853,12 @@ if __name__ == '__main__':
 
             try:
 
-                if Startup_Update_All_Labels == "True" and myAlarm.skipLabelUpdate() == 0:
+                if Startup_Update_All_Labels == "True" and my_alarm.skipLabelUpdate() == 0:
 
                     client.publish(Topic_Publish_AppState, "State Machine 3, Reading labels from alarm", 0, True)
 
                     logger.info("Updating all labels from alarm")
-                    myAlarm.updateAllLabels(Startup_Publish_All_Info, Topic_Publish_Labels, Debug_Mode)
+                    my_alarm.updateAllLabels(Startup_Publish_All_Info, Topic_Publish_Labels, Debug_Mode)
 
                     State_Machine += 1
                     logger.info("Listening for events...")
@@ -865,37 +888,40 @@ if __name__ == '__main__':
 
             try:
                 # Test for new events & publish to broker
-                myAlarm.testForEvents(Events_Payload_Numeric, Debug_Mode)
+                timeRemaining = time.time() - lastKeepAlive + Keep_Alive_Interval
+                if lastKeepAlive > 0 and timeRemaining > 0:
+                    print(timeRemaining)
+                    my_alarm.testForEvents(Events_Payload_Numeric, Debug_Mode, timeout=timeRemaining)
 
                 # Test for pending Alarm Control
                 if Alarm_Control_Action == 1:
-                    myAlarm.controlAlarm(Alarm_Control_Partition, Alarm_Control_NewState, Debug_Mode)
+                    my_alarm.controlAlarm(Alarm_Control_Partition, Alarm_Control_NewState, Debug_Mode)
                     Alarm_Control_Action = 0
                     logger.info( "Listening for events...")
                     client.publish(Topic_Publish_AppState, "State Machine 4, Listening for events...", 0, True)
 
                 # Test for pending Force Output Control
                 if Output_FControl_Action == 1:
-                    myAlarm.controlPGM(Output_FControl_Number, Output_FControl_NewState.upper(), Debug_Mode)
+                    my_alarm.controlPGM(Output_FControl_Number, Output_FControl_NewState.upper(), Debug_Mode)
                     Output_FControl_Action = 0
                     logger.info("Listening for events...")
                     client.publish(Topic_Publish_AppState, "State Machine 4, Listening for events...", 0, True)
 
                 # Test for pending Pulse Output Control
                 if Output_PControl_Action == 1:
-                    myAlarm.controlPGM(Output_PControl_Number, Output_PControl_NewState.upper(), Debug_Mode)
+                    my_alarm.controlPGM(Output_PControl_Number, Output_PControl_NewState.upper(), Debug_Mode)
                     time.sleep(0.5)
                     if Output_PControl_NewState.upper() in ["ON", "1", "TRUE", "ENABLE"]:
-                        myAlarm.controlPGM(Output_PControl_Number, "OFF", Debug_Mode)
+                        my_alarm.controlPGM(Output_PControl_Number, "OFF", Debug_Mode)
                     else:
-                        myAlarm.controlPGM(Output_PControl_Number, "ON", Debug_Mode)
+                        my_alarm.controlPGM(Output_PControl_Number, "ON", Debug_Mode)
 
                     Output_PControl_Action = 0
                     logger.info("Listening for events...")
                     client.publish(Topic_Publish_AppState, "State Machine 4, Listening for events...", 0, True)
                 
-                if time.time() > lastKeepAlive + Keep_Alive_Interval:
-                    myAlarm.keepAlive(Debug_Mode)
+                if time.time() >= lastKeepAlive + Keep_Alive_Interval:
+                    my_alarm.keepAlive(Debug_Mode)
                     lastKeepAlive = time.time()
 
             except Exception, e:
@@ -912,8 +938,8 @@ if __name__ == '__main__':
                     attempts = 3
 
         elif State_Machine == 20:
-            myAlarm.disconnect()
-            myAlarm.startSerialPassthrough()
+            my_alarm.disconnect()
+            my_alarm.startSerialPassthrough()
             State_Machine = 1
 
         elif State_Machine == 10:

@@ -32,6 +32,7 @@ The behaviour is similar to the one obtained with [ParadoxIP150v2](https://githu
 * Because my scenario is not bandwidth limited, MQTT topics are now more verbose.
 * Voltage values are processed
 * New KeepAlive mechanism now maintains a constant connection with the module.
+* Processing of zone status bits
 * Many small fixes
 * __PLANED__: Passthrough or IP150 mode, so that an IP150 is emulated and babyware/winload can connect remotelly. Passthrough already tested successfully and will be integrated soon.
 
@@ -41,8 +42,6 @@ The main script will connect to a panel (currently only through Serial) and logi
 Once the info (mostly labels) has been extracted from the alarm, the MQTT broker is used as middleware between your application and the alarm panel.
 
 Seeing as not all alarm variants are initially supported, you can use the config.ini file to switch off different portions of the script. Not all event types may be implemented, but most shoud be!
-
-## What to expect:
 
 ### Labels
 If successfully connected to your panel and MQTT broker, the app will optionally start off by publishing (once-off) all the detected labels (zone, partition, output, etc. names) to your broker. Both the reading of label names and publishing thereof can be independantly controlled through the config.ini file. If you do read the labels, events such as "Zone open - Zone number 3" will translate to "Zone open - Garage door" or "Low battery on zone - Zone 1" to "Low battery on zone - Alley Beam" (assuming this is named/configured as such in your alarm).

@@ -212,7 +212,7 @@ class CommSerial:
         self.comm.write(data)
         
     def read(self, sz=37, timeout=1):
-	self.comm.timeout = timeout
+        self.comm.timeout = timeout
 
         data = self.comm.read(sz)
 
@@ -459,6 +459,7 @@ class Paradox:
                         se = ord(message[8])
                         if se in [2, 3, 4, 5, 6, 7, 11, 12, 14]:
                             client.publish(Topic_Publish_Status + "/Partitions/", subevent, qos=1, retain=True)
+                            
                     elif ord(message[7]) in [29, 30, 31, 32, 33, 40, 44, 45] :
                         client.publish(Topic_Publish_Status + "/System/", event + " -> " + subevent, qos=1, retain=True)
 
@@ -511,17 +512,12 @@ class Paradox:
 
     def controlGenericOutput(self, mapping_dict, outputs, state, Debug_Mode=0):
 
-        registers = mapping_dict
-        if outputs == "ALL":
-            outputs = range(1, 1 + len(Alarm_Data['labels']['outputLabel']))
-        else:
-            outputs = [output]
-
+      
         logger.info("Sending generic Output Control: Output: " + str(outputs) + ", State: " + state)
 
         for output in outputs:
 
-            message = registers[output][state]
+            message = mapping_dict[output][state]
 
             if not isinstance(message, basestring):
                 logger.warning("Generic Output: Message to be sent is not a string: %r" % message)
@@ -534,24 +530,37 @@ class Paradox:
         return
 
     def controlPGM(self, pgm, state="OFF", Debug_Mode=0):
-        if pgm == "ALL":
-            pgms = range(0, 17)
-        else:
-            if not isinstance(pgm, int) or not (pgm >= 0 and pgm <= 16):
-                logger.warning("Problem with PGM number: %r" % str(pgm))
-                return
-            pgms = [pgm]
+       
+        if isinstance(pgm, basestring):
+            if pgm == "ALL":
+                pgm = range(1, 1 + len(Alarm_Data['labels']['outputLabel']))
+            else:
+                try:
+                    pgm = json.loads(pgm)
+                    if not isinstance(pgm, list):
+                        logger.warning("PGM must be str, int or list")
+                        return
+                except:
+                    logger.warning("Could not decode partition list")
+                    return
 
-        if not isinstance(state, basestring):
-            logger.warning("PGM State given is not a string: %r" % str(state))
+        elif isinstance(pgm, int):
+            pgm = [pgm]
+
+        elif not isinstance(pgm, list):
+            logger.warning("PGM must be str, int or list")
             return
 
         if not state in ["ON", "1", "TRUE", "ENABLE", "OFF", "FALSE", "0", "DISABLE"]:
             logger.warning("PGM State is not given correctly: %r" % str(state))
             return
 
-        for p in pgms:
-            self.controlGenericOutput(self.registermap.getcontrolOutputRegister(), p, state, Debug_Mode)
+        for p in pgm:
+            if not isinstance(p, int) or not (p >= 0 and p <= len(Alarm_Data['labels']['outputLabel'])):
+                logger.warning("Problem with PGM number: %r" % str(p))
+                return
+
+        self.controlGenericOutput(self.registermap.getcontrolOutputRegister(), pgm, state, Debug_Mode)
 
         return
 
@@ -560,14 +569,7 @@ class Paradox:
 
         logger.info("Sending generic Alarm Control: Partition: " + str(partition) + ", State: " + state)
 
-        if partition == "ALL":
-            partition = range(1, 1 + len(Alarm_Data['labels']['partitionLabel']))
-        elif isinstance(partition, int):
-            partition = [partition]
-        
         for p in partition:
-            
-            p = int(p)
             if p not in registers.keys():
                 logger.warning("Invalid partition: %d", p)
                 continue
@@ -582,26 +584,39 @@ class Paradox:
 
     def controlAlarm(self, partition=1, state="Disarm", Debug_Mode=0):
 
-        state = state.split(' ')[0]
+        state = state.split(' ')[0].upper()
+        
 
-        if not isinstance(state, basestring):
-            logger.warning("State given is not a string: %r" % str(state))
+        if isinstance(partition, basestring):
+            if partition == "ALL":
+                partition = range(1, 1 + len(Alarm_Data['labels']['partitionLabel']))
+            else:
+                try:
+                    partition = json.loads(partition)
+                    if not isinstance(partition, list):
+                        logger.warning("Partition must be str, int or list")
+                        return
+                except:
+                    logger.warning("Could not decode partition list")
+                    return
+
+        elif isinstance(partition, int):
+            partition = [partition]
+
+        elif not isinstance(partition, list):
+            logger.warning("Partition must be str, int or list")
             return
-    
-        if partition.upper() == "ALL":
-            logger.debug("Setting ALL Partitions")
-            if not(state.upper() in self.registermap.getcontrolAlarmRegister()[Alarm_Data['labels']['partitionLabel'].keys()[0]]):
-                logger.warning("State is not given correctly: %r" % str(state))
-                return
-        elif  isinstance(partition, int):
-            if not (partition >= 0 and partition <= 16):
-                logger.warning("Problem with partition number: %r" % str(partition))
-                return
-            if not(state.upper() in self.registermap.getcontrolAlarmRegister()[partition]):
-                logger.warning("State is not given correctly: %r" % str(state))
+        
+        for p in partition:
+            if not p in self.registermap.getcontrolAlarmRegister().keys():
+                logger.warning("Unkown partition")
                 return
 
-        self.controlGenericAlarm(self.registermap.getcontrolAlarmRegister(), partition.upper(), state.upper(), Debug_Mode)
+            if not state in self.registermap.getcontrolAlarmRegister()[p].keys():
+                logger.warning("State is not given correctly: %r for partition %d" % (str(state), p))
+                return
+
+        self.controlGenericAlarm(self.registermap.getcontrolAlarmRegister(), partition, state, Debug_Mode)
 
         return
 
@@ -666,7 +681,18 @@ class Paradox:
                          client.publish(Topic_Publish_Status+"/Zones/"+Alarm_Data['labels']['zoneLabel'][i + 1].replace(' ','_').title(), Alarm_Data['zone'][i], retain=True)
                        
             elif aliveSeq == 1:
-                pass
+                for i in [0, 1]:
+                    state = 0
+                    if ord(data[18 + i * 3]) == 0x01:
+                        state = "Arming"
+                    elif ord(data[17 + i * 3]) == 0x01:
+                        state = "Armed"
+                    else:
+                        state  = "Disarmed"
+                    if Alarm_Data['partition'][i] != state:
+                        Alarm_Data['partition'][i] = state
+                        client.publish(Topic_Publish_Status + "/Partitions/%d/" % (i + 1), state )
+                
 
             aliveSeq += 1
         
@@ -969,4 +995,6 @@ if __name__ == '__main__':
 
         else:
             State_Machine = 2
+
+
 

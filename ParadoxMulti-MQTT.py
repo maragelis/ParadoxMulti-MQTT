@@ -683,15 +683,15 @@ class Paradox:
             elif aliveSeq == 1:
                 for i in [0, 1]:
                     state = 0
-                    if ord(data[18 + i * 3]) == 0x01:
+                    if ord(data[18 + i * 4]) == 0x01:
                         state = "Arming"
-                    elif ord(data[17 + i * 3]) == 0x01:
+                    elif ord(data[17 + i * 4]) == 0x01:
                         state = "Armed"
                     else:
                         state  = "Disarmed"
                     if Alarm_Data['partition'][i] != state:
                         Alarm_Data['partition'][i] = state
-                        client.publish(Topic_Publish_Status + "/Partitions/%d/" % (i + 1), state )
+                        client.publish(Topic_Publish_Status + "/Partitions/%d/" % (i + 1), state, retain=True )
                 
 
             aliveSeq += 1

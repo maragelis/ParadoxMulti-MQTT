@@ -37,6 +37,7 @@ MQTT_Port = 1883
 MQTT_KeepAlive = 60  # Seconds
 
 # Options are Arm, Disarm, Stay, Sleep (case sensitive!)
+Topic_Debug = "Paradox/Debug"
 Topic_Publish_Battery = "Paradox/Voltage"
 Topic_Publish_Events = "Paradox/Events"
 Topic_Publish_Status = "Paradox/Status"
@@ -65,7 +66,7 @@ Output_PControl_NewState = ""
 State_Machine = 0
 Debug_Mode = 2
 Poll_Speed = 1
-Debug_Packets = False
+Debug_Packets = True
 Keep_Alive_Interval = 2
 
 Alarm_Data = {}
@@ -105,6 +106,7 @@ def on_message(client, userdata, msg):
     global Output_PControl_NewState
     global Output_PControl_Action
     global State_Machine
+    global Debug_Packets
 
     valid_states = ['Arm', 'Disarm', 'Sleep', 'Stay']
 
@@ -166,10 +168,13 @@ def on_message(client, userdata, msg):
                 logger.exception("MQTT message received with incorrect structure")
 
         elif msg.topic.split("/")[-1] == "State":
-            if msg.payload.upper() == "NORMAL" and State_Machine == 20:
+            if msg.payload.upper() == "DEBUGPACKETS":
+                Debug_Packets = True
+            elif msg.payload.upper() == "NODEBUGPACKETS":
+                Debug_Packets = False
+            elif msg.payload.upper() == "NORMAL" and State_Machine == 20:
                 if myAlarm is not None:
                     myAlarm.stopSerialPassthrough()
-
                 logger.info("Switching to Standard mode")
             elif msg.payload.upper() == "PASSTHROUGH":
                 State_Machine = 20
@@ -184,9 +189,10 @@ def on_message(client, userdata, msg):
 class CommSerial:
     comm = None
     
-    def __init__(self, serialport):
+    def __init__(self, serialport, mqttc):
         self.serialport = serialport
         self.comm = None
+        self.client = mqttc
 
     def connect(self, baud=9600, timeout=1):
         try:
@@ -204,11 +210,11 @@ class CommSerial:
 
     def write(self, data):
         if Debug_Packets and logger.isEnabledFor(logging.DEBUG):
-            m = "Data OUT -> " + str(len(data)) + " -b- "
+            m = str(len(data)) + " -b- "
             for c in data:
                 m += " %02x" % ord(c)
-            logger.debug(m)
-
+            #logger.debug(m)
+            self.client.publish(Topic_Debug + "/OUT", m, qos=2)
         self.comm.write(data)
         
     def read(self, sz=37, timeout=1):
@@ -218,11 +224,11 @@ class CommSerial:
 
         if Debug_Packets and logger.isEnabledFor(logging.DEBUG):
             if data is not None and len(data) > 0:
-                m = "Data IN  <- " + str(len(data)) + " -b- "                
+                m = str(len(data)) + " -b- "                
 
                 for c in data:
                     m += " %02x" % ord(c)
-                logger.debug(m)
+                self.client.publish(Topic_Debug+"/INP", m, qos=2)
 
         return data
     def disconnect(self):
@@ -691,7 +697,7 @@ class Paradox:
                         state  = "Disarmed"
                     if Alarm_Data['partition'][i] != state:
                         Alarm_Data['partition'][i] = state
-                        client.publish(Topic_Publish_Status + "/Partitions/%d/" % (i + 1), state, retain=True )
+                        client.publish(Topic_Publish_Status + "/Partitions/%d/" % (i + 1), state )
                 
 
             aliveSeq += 1
@@ -861,7 +867,7 @@ if __name__ == '__main__':
             try:
                 client.publish(Topic_Publish_AppState, "State Machine 2, Connecting to Alarm...", 0, True)
 
-                comms = CommSerial(SERIAL_PORT)
+                comms = CommSerial(SERIAL_PORT, client)
                 if not comms.connect():
                     logger.critical("Error connecting to Alarm")
                     sys.exit(0)

@@ -805,6 +805,8 @@ if __name__ == '__main__':
 
                 MQTT_IP = Config.get("MQTT Broker", "IP")
                 MQTT_Port = int(Config.get("MQTT Broker", "Port"))
+                SERIAL_PORT =  Config.get("SERIAL", "SERIAL_PORT")
+                passw = Config.get("SERIAL", "Password")
 
                 Topic_Publish_Events = Config.get("MQTT Topics", "Topic_Publish_Events")
                 Events_Payload_Numeric = Config.get("MQTT Topics", "Events_Payload_Numeric")

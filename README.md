@@ -14,7 +14,7 @@ Tested in the following environment:
 
 ## Steps to use it:
 1.  Download the files in this repository and place it in some directory
-2.  Edit the config.ini file to match your setup
+2.  Copy config.ini.example to config.ini and edit it to match your setup
 3.  Run the script: Python Multi-MQTTv2.py
 
 
@@ -25,7 +25,7 @@ The behaviour is similar to the one obtained with [ParadoxIP150v2](https://githu
 ## Changes from the original project
 * Using a python logging module, instead of print
 * Polling the serial port is now always done. This may help to discover connectivity losses and will allow to obtain some stats (battery, and eventually zones)
-* Changed the logic so that it handles Paradox messages without the headers required by the connectivity module (Serial or IP150).
+* Changed the logic so that it handles Paradox messages without the headers required by the connectivity module (IP150).
 * Abstracted the channel to a separate class.
 * A new config file option was added (SERIAL). See the example.
 * Changes on how to deal with Arming and events. 

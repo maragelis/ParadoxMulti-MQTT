@@ -8,8 +8,8 @@ Tested in the following environment:
 
 * Python 2.7.13 
 * [Mosquitto MQTT Broker v1.4.10 and v1.4.14](http://mosquitto.org)
-* [OrangePi 2G-IOT](http://www.orangepi.org/OrangePi2GIOT/) through its internal Serial Port and Raspberry PI 3 through USB370 paradox module
-* Ubuntu Server 16.04.3 LTS and Devuan Ceres as for december 2017 for RPI
+* [OrangePi 2G-IOT](http://www.orangepi.org/OrangePi2GIOT/) through its internal Serial Port, Raspberry PI 3 and Beaglebone black through USB370 paradox module
+* Ubuntu Server 16.04.3 LTS and Devuan Ceres as for december 2017 for RPI and for Beaglebone black
 * Paradox MG5050 panel
 
 ## Steps to use it:

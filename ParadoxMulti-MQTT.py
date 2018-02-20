@@ -942,6 +942,9 @@ if __name__ == '__main__':
                 if Zone_Amount % 2 != 0:
                     Zone_Amount += 1
 
+                passw = Config.get ("SERIAL", "Password")
+                SERIAL_PORT = Config.get("SERIAL", "SERIAL_PORT")
+
                 MQTT_IP = Config.get("MQTT Broker", "IP")
                 MQTT_Port = int(Config.get("MQTT Broker", "Port"))
                 MQTT_KeepAlive = int(Config.get("MQTT Broker", "KeepAlive"))

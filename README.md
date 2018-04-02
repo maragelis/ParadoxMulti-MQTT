@@ -8,7 +8,7 @@ Tested in the following environment:
 
 * Python 2.7.12 - 2.7.13 
 * [Mosquitto MQTT Broker v1.4.10 and v1.4.14](http://mosquitto.org)
-* [OrangePi 2G-IOT](http://www.orangepi.org/OrangePi2GIOT/) and NanoPi NEO through its internal Serial Port (and a level switch!), Raspberry PI 3 and Beaglebone black through USB370 paradox module
+* [OrangePi 2G-IOT](http://www.orangepi.org/OrangePi2GIOT/) and [NanoPi NEO](http://www.friendlyarm.com/index.php?route=product/product&product_id=132) through its internal Serial Port (and a level switch!) or an external USB Serial, Raspberry PI 3 and Beaglebone black through USB370 paradox module
 * Ubuntu Server 16.04.3 LTS and Devuan Ceres as for december 2017 for RPI and for Beaglebone black
 * Paradox MG5050 panel
 

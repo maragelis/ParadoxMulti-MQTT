@@ -69,7 +69,7 @@ State_Machine = 0
 Debug_Mode = 2
 Poll_Speed = 1
 Debug_Packets = False
-Keep_Alive_Interval = 3
+Keep_Alive_Interval = 5
 
 Alarm_Data = {'zone': [], 'partition': []}
 myAlarm = None
@@ -186,9 +186,6 @@ def on_message(client, userdata, msg):
                 logger.info("Reseting Paradox Multi MQTT")
             else:
                 logger.warning("Unknown new state: %s", msg.payload)
-        
-        myAlarm.newCommand()
-
 
 class CommSerial:
     comm = None
@@ -197,7 +194,7 @@ class CommSerial:
         self.serialport = serialport
         self.comm = None
         self.client = mqttc
-        self.interrupted = False
+        self.callbacks = dict()
 
     def connect(self, baud=9600, timeout=1):
         try:
@@ -223,32 +220,47 @@ class CommSerial:
                 self.client.publish(Topic_Debug + "/OUT", m, qos=2)
         self.comm.write(data)
         
-    def read(self, sz=37, timeout=1, interruptible=False):
-        self.interrupted = False
-        
+    def read(self, sz=37, timeout=1):        
         self.comm.timeout = timeout
-        
-        data = None
 
-        if interruptible:
-            now = time.time()
-            while data is None and not self.interrupted and self.comm.is_open and time.time() - now < timeout:
-                if self.comm.in_waiting > 0:
-                    data = self.comm.read(sz)
+        data = ""
+        tstart = time.time()
+        while True:
+
+            while not self.checksum(data) and time.time() < (tstart + timeout):
+                
+                recv_data = self.comm.read(sz)
+                # Unable to read. Return None
+                if recv_data is None:
+                    return None
+
+                if len(data) > 0:
+                    # If are here, the packet is corrupted. Lets read what is left
+                    data = data[sz:] + recv_data
                 else:
-                    time.sleep(0.25)
-                 
-        else:
-            data = self.comm.read(sz)
+                    data = recv_data
+                    sz = min(1, self.comm.in_waiting) #In the next read we get the missing bytes
+            
+            # Message is invalid. Discard
+            if not self.checksum(data):
+                return None
 
-        if Debug_Packets and logger.isEnabledFor(logging.DEBUG):
-            if data is not None and len(data) > 0:
-                m = str(len(data)) + " <- "                
+            if Debug_Packets and logger.isEnabledFor(logging.DEBUG):
+                if data is not None and len(data) > 0:
+                    m = str(len(data)) + " <- "                
 
-                for c in data:
-                    m += " %02x" % ord(c)
-                logger.debug(m)
-                self.client.publish(Topic_Debug+"/INP", m, qos=2)
+                    for c in data:
+                        m += " %02x" % ord(c)
+                    logger.debug(m)
+
+                    self.client.publish(Topic_Debug+"/INP", m, qos=2)
+
+            # If message is async, deliver through the callback
+            for k in self.callbacks.keys():
+                if data.startswith(k):
+                    self.callbacks[k](data)
+            else:
+                return data
 
         return data
     def disconnect(self):
@@ -260,8 +272,22 @@ class CommSerial:
     def getfd(self):
         return self.comm.fileno()
 
-    def interrupt(self):
-        self.interrupted = True
+    def registerMessageCallback(self, mid, callback):
+        logger.debug("Register callback for message")
+        self.callbacks[mid] = callback
+
+    def checksum(self, data):
+        c = 0
+
+        if len(data) != 37:
+            return False
+
+        for i in data[:-1]:
+            c += ord(i)
+
+        r = (c % 256) == ord(data[-1])
+
+        return r
 
 # To be implemented. Do dot have the hardware to proceed. 
 class CommIP150:
@@ -299,8 +325,6 @@ class Paradox:
         self.alarmregmap = _alarmregmap
         self.mode = 0
 
-        # MyClass = getattr(importlib.import_module("." + self.alarmmodel + "EventMap", __name__))
-
         try:
             mod = __import__("ParadoxMap", fromlist=[self.alarmeventmap + "EventMap"])
             self.eventmap = getattr(mod, self.alarmeventmap + "EventMap")
@@ -320,11 +344,9 @@ class Paradox:
         except Exception, e:
             logger.exception( "Failed to load Register Map (defaulting to not update labels from alarm): ", repr(e))
             self.Skip_Update_Labels = 1
-
-
-
-            # self.eventmap = ParadoxMG5050EventMap  # Need to check panel type here and assign correct dictionary!
-            # self.registermap = ParadoxMG5050Registers  # Need to check panel type here and assign correct dictionary!
+        
+        self.comms.registerMessageCallback('\xe0', self.handleEvent)
+        self.comms.registerMessageCallback('\xe2\x14', self.handleEvent)
 
     def skipLabelUpdate(self):
         return self.Skip_Update_Labels
@@ -440,7 +462,6 @@ class Paradox:
                     completed_dict = getattr(self.eventmap, "getAll" + func)()
                     if Debug_Mode >= 1:
                         logger.info("Labels detected for " + func + ": " + str(completed_dict))
-            
                     
                 except Exception, e:
                     logger.exception( "Failed to load supported function's completed mappings after updating: " + repr(e))
@@ -454,20 +475,12 @@ class Paradox:
                     client.publish(Topic_Publish_Labels + "/" + topic[0].upper() + topic[1:] + "s",
                                    ';'.join('{}{}'.format(key, ":" + val) for key, val in completed_dict.items()))
 
-
             except Exception, e:
                 logger.exception( "Failed to load supported function's mapping: " + repr(e))
 
         return
 
-    def testForEvents(self, Events_Payload_Numeric=0, Debug_Mode=0, timeout=1):
-    
-        # Wait for events during a timeout or until an interruption
-        message = self.comms.read(timeout=timeout, interruptible=True)
-        
-        if message is None or len(message) < 9:
-            return None
-
+    def handleEvent(self, message, Events_Payload_Numeric=0, Debug_Mode=0,):
         reply = '.'
 
         if len(message) > 0:
@@ -499,14 +512,20 @@ class Paradox:
             else:
                 reply = "Unknown event: " + " ".join(hex(ord(i)) for i in message)
 
-
-
         return reply
 
-    def readDataRaw(self, request='', Debug_Mode=2, testForEvents=False):
+    def testForEvents(self, Events_Payload_Numeric=0, Debug_Mode=0, timeout=1):
+    
+        # Wait for events during a timeout
+        message = self.comms.read(timeout=timeout)
+        
+        if message is None or len(message) < 9:
+            return None
 
-        if testForEvents:
-            self.testForEvents(timeout=0.1)                # First check for any pending events received
+        return self.handleEvent(message, Events_Payload_Numeric, Debug_Mode)
+         
+
+    def readDataRaw(self, request='', Debug_Mode=2):
 
         tries = self.retries
 
@@ -653,9 +672,17 @@ class Paradox:
             message += bytes(bytearray([aliveSeq]))
             message += "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
 
-            data = self.readDataRaw(self.format37ByteMessage(message), testForEvents=True)
+
+            data = self.readDataRaw(self.format37ByteMessage(message))
+    
             if len(data) != 37 or ord(data[0]) != 0x52 or ord(data[3]) != aliveSeq:
                 logger.warn("Invalid message")
+                if data is not None and len(data) > 0:
+                    m = str(len(data)) + " <- "                
+
+                    for c in data:
+                        m += " %02x" % ord(c)
+                    logger.debug(m)
                 return
 
             if aliveSeq == 0:
@@ -668,6 +695,7 @@ class Paradox:
                 voltage =   {'vdc': round(ord(data[15])*(20.3-1.4)/255.0+1.4,1) , 
                             'dc': round(ord(data[16])*22.8/255.0,1),
                             'battery': round(ord(data[17])*22.8/255.0,1)}
+
                 if not 'voltage' in Alarm_Data.keys() or \
                     abs(voltage['vdc'] - Alarm_Data['voltage']['vdc']) > 0.3 or abs(voltage['dc'] - Alarm_Data['voltage']['dc']) > 0.3 or abs(voltage['battery'] - Alarm_Data['voltage']['battery']) > 0.3:
                 
@@ -726,8 +754,6 @@ class Paradox:
                         client.publish(Topic_Publish_Status + "/Partitions/All", str(states.keys()[0]), retain=True )
                     else:
                         client.publish(Topic_Publish_Status + "/Partitions/All", "Mixed", retain=True )
-        
-
             aliveSeq += 1
         
     def walker(self, ):
@@ -806,11 +832,6 @@ class Paradox:
 
     def stopSerialPassthrough(self):
         self.mode = 0
-
-    def newCommand(self):
-        # Got a new command. If possible, process it.
-        self.comms.interrupt()
-
 
 
 if __name__ == '__main__':
@@ -961,6 +982,7 @@ if __name__ == '__main__':
                     State_Machine += 1
                     logger.info("Listening for events...")
                     client.publish(Topic_Publish_AppState, "State Machine 4, Listening for events...", 0, True)
+
             except Exception, e:
 
                 logger.exception( "Error reading labels: " + repr(e))

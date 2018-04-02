@@ -200,6 +200,40 @@ class ParadoxMG5050Registers():
                     1: {"ARM": "\x40\x00\x04\x00", "DISARM": "\x40\x00\x05\x00", "SLEEP": "\x40\x00\x03\x00", "STAY": "\x40\x00\x01\x00"},
                     2: {"ARM": "\x40\x00\x04\x01", "DISARM": "\x40\x00\x05\x01", "SLEEP": "\x40\x00\x03\x01", "STAY": "\x40\x00\x01\x01"}}
 
+    controlZone = {"Header": "",
+                    1: {"BYPASS": "\x40\x00\x10\x00\x04", "CLEAR_BYPASS": "\x40\x00\x10\x00\x04"},
+                    2: {"BYPASS": "\x40\x00\x10\x01\x04", "CLEAR_BYPASS": "\x40\x00\x10\x01\x04"},
+                    3: {"BYPASS": "\x40\x00\x10\x02\x04", "CLEAR_BYPASS": "\x40\x00\x10\x02\x04"},
+                    4: {"BYPASS": "\x40\x00\x10\x03\x04", "CLEAR_BYPASS": "\x40\x00\x10\x03\x04"},
+                    5: {"BYPASS": "\x40\x00\x10\x04\x04", "CLEAR_BYPASS": "\x40\x00\x10\x04\x04"},
+                    6: {"BYPASS": "\x40\x00\x10\x05\x04", "CLEAR_BYPASS": "\x40\x00\x10\x05\x04"},
+                    7: {"BYPASS": "\x40\x00\x10\x06\x04", "CLEAR_BYPASS": "\x40\x00\x10\x06\x04"},
+                    8: {"BYPASS": "\x40\x00\x10\x07\x04", "CLEAR_BYPASS": "\x40\x00\x10\x07\x04"},
+                    9: {"BYPASS": "\x40\x00\x10\x08\x04", "CLEAR_BYPASS": "\x40\x00\x10\x08\x04"},
+                    10: {"BYPASS": "\x40\x00\x10\x09\x04", "CLEAR_BYPASS": "\x40\x00\x10\x09\x04"},
+                    11: {"BYPASS": "\x40\x00\x10\x0a\x04", "CLEAR_BYPASS": "\x40\x00\x10\x0a\x04"},
+                    12: {"BYPASS": "\x40\x00\x10\x0b\x04", "CLEAR_BYPASS": "\x40\x00\x10\x0b\x04"},
+                    13: {"BYPASS": "\x40\x00\x10\x0c\x04", "CLEAR_BYPASS": "\x40\x00\x10\x0c\x04"},
+                    14: {"BYPASS": "\x40\x00\x10\x0d\x04", "CLEAR_BYPASS": "\x40\x00\x10\x0d\x04"},
+                    15: {"BYPASS": "\x40\x00\x10\x0e\x04", "CLEAR_BYPASS": "\x40\x00\x10\x0e\x04"},
+                    16: {"BYPASS": "\x40\x00\x10\x0f\x04", "CLEAR_BYPASS": "\x40\x00\x10\x0f\x04"},
+                    17: {"BYPASS": "\x40\x00\x10\x10\x04", "CLEAR_BYPASS": "\x40\x00\x10\x10\x04"},
+                    18: {"BYPASS": "\x40\x00\x10\x11\x04", "CLEAR_BYPASS": "\x40\x00\x10\x11\x04"},
+                    19: {"BYPASS": "\x40\x00\x10\x12\x04", "CLEAR_BYPASS": "\x40\x00\x10\x12\x04"},
+                    20: {"BYPASS": "\x40\x00\x10\x13\x04", "CLEAR_BYPASS": "\x40\x00\x10\x13\x04"},
+                    21: {"BYPASS": "\x40\x00\x10\x14\x04", "CLEAR_BYPASS": "\x40\x00\x10\x14\x04"},
+                    22: {"BYPASS": "\x40\x00\x10\x15\x04", "CLEAR_BYPASS": "\x40\x00\x10\x15\x04"},
+                    23: {"BYPASS": "\x40\x00\x10\x16\x04", "CLEAR_BYPASS": "\x40\x00\x10\x16\x04"},
+                    24: {"BYPASS": "\x40\x00\x10\x17\x04", "CLEAR_BYPASS": "\x40\x00\x10\x17\x04"},
+                    25: {"BYPASS": "\x40\x00\x10\x18\x04", "CLEAR_BYPASS": "\x40\x00\x10\x18\x04"},
+                    26: {"BYPASS": "\x40\x00\x10\x19\x04", "CLEAR_BYPASS": "\x40\x00\x10\x19\x04"},
+                    27: {"BYPASS": "\x40\x00\x10\x1a\x04", "CLEAR_BYPASS": "\x40\x00\x10\x1a\x04"},
+                    28: {"BYPASS": "\x40\x00\x10\x1b\x04", "CLEAR_BYPASS": "\x40\x00\x10\x1b\x04"},
+                    29: {"BYPASS": "\x40\x00\x10\x1c\x04", "CLEAR_BYPASS": "\x40\x00\x10\x1c\x04"},
+                    30: {"BYPASS": "\x40\x00\x10\x1d\x04", "CLEAR_BYPASS": "\x40\x00\x10\x1d\x04"},
+                    31: {"BYPASS": "\x40\x00\x10\x1e\x04", "CLEAR_BYPASS": "\x40\x00\x10\x1e\x04"},
+                    32: {"BYPASS": "\x40\x00\x10\x1f\x04", "CLEAR_BYPASS": "\x40\x00\x10\x1f\x04"},
+                    }
 
     @staticmethod
     def getzoneLabelRegister():
@@ -248,6 +282,10 @@ class ParadoxMG5050Registers():
         # try:
         return ParadoxMG5050Registers.controlAlarm
 
+    @staticmethod
+    def getcontrolZoneRegister():
+        # try:
+        return ParadoxMG5050Registers.controlZone
 
     @staticmethod
     def getsupportedItems():

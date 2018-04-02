@@ -65,6 +65,10 @@ Output_FControl_NewState = ""
 Output_PControl_Action = 0
 Output_PControl_Number = 0
 Output_PControl_NewState = ""
+Zone_Control_Action = 0
+Zone_Control_Number = 0
+Zone_Control_NewState = ""
+
 State_Machine = 0
 Debug_Mode = 2
 Poll_Speed = 1
@@ -168,6 +172,22 @@ def on_message(client, userdata, msg):
                 Alarm_Control_Action = 1
             except:
                 logger.exception("MQTT message received with incorrect structure")
+        elif "/Zone/" in msg.topic:
+            try:
+                Zone_Control_Number = topic.split("/")[-1]
+                logger.debug( "Alarm control zone: %s ", Zone_Control_Number)
+                Zone_Control_NewState = msg.payload.strip()
+                if len(Zone_Control_NewState) < 1:
+                    logger.warning('No payload given for alarm control: e.g. Disarm')
+                    return
+
+                logger.debug( "Alarm control state: %s", Zone_Control_NewState)
+                client.publish(Topic_Publish_AppState,
+                               "Alarm: Control zone " + str(Zone_Control_Number) + " to state: " + Zone_Control_NewState,
+                               0, True)
+                Zone_Control_Action = 1
+            except:
+                logger.exception("MQTT message received with incorrect structure")
 
         elif msg.topic.split("/")[-1] == "State":
             if msg.payload.upper() == "DEBUGPACKETS":
@@ -236,7 +256,7 @@ class CommSerial:
 
                 if len(data) > 0:
                     # If are here, the packet is corrupted. Lets read what is left
-                    data = data[sz:] + recv_data
+                    data = data[1:] + recv_data
                 else:
                     data = recv_data
                     sz = min(1, self.comm.in_waiting) #In the next read we get the missing bytes
@@ -654,6 +674,55 @@ class Paradox:
 
         return
 
+
+    def controlGenericZone(self, mapping_dict, zone, state, Debug_Mode):
+        registers = mapping_dict
+
+        logger.info("Sending generic Alarm Control: Zone: " + str(zone) + ", State: " + state)
+
+        for z in zone:
+            if z not in registers.keys():
+                logger.warning("Invalid Zone: %d", p)
+                continue
+    
+            message = registers[z][state]
+            message = message.ljust(36, '\x00')
+            reply = self.readDataRaw(self.format37ByteMessage(message), Debug_Mode)
+            
+        return
+
+    def controlZone(self, zone="1", state="CLEAR_BYPASS", Debug_Mode=0):
+        
+        zone = zone.upper()
+        state = state.split(' ')[0].upper()
+
+        if zone.isdigit():
+            zone = [int(zone)]
+        elif zone == "ALL":
+            zone = range(1, 1 + len(Alarm_Data['labels']['zoneLabel']))
+        else:
+            try:
+                zone = json.loads(zone)
+                if not isinstance(zone, list):
+                    logger.warning("Zone must be str, int or list")
+                    return
+            except:
+                logger.warning("Could not decode zone list")
+                return
+        
+        for z in zone:
+            if not z in self.registermap.getcontrolZoneRegister().keys():
+                logger.warning("Unkown Zone")
+                return
+
+            if not state in self.registermap.getcontrolZoneRegister()[p].keys():
+                logger.warning("State is not given correctly: %r for zone %d" % (str(state), p))
+                return
+
+        self.controlGenericZone(self.registermap.getcontrolZoneRegister(), zone, state, Debug_Mode)
+        
+        return
+
     def disconnect(self, Debug_Mode=0):
         message = "\x70\x00\x05\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01\x00\x00\x76"
         self.readDataRaw(self.format37ByteMessage(message))
@@ -802,23 +871,39 @@ class Paradox:
 
             while self.mode == 1:
                 try:
-                    client = s.accept()
-                    logger.debug("Passthrough: Client connected: %s", str(client))
+                    client, addr = s.accept()
+                    logger.debug("Passthrough: Client connected: %s", str(addr))
+                    break
                 except socket.timeout:
                     pass
 
 
             inputs.append(client)
 
+            print(inputs)
             while self.mode == 1:
                 readable, writable, exceptional = select.select(inputs, [] , inputs, 5)
 
-                for fin in readable:
-                    if fin == inputs[0]:
-                        client.send(self.comms.read())
-                    else:
-                        self.comms.write(client.recv())
-                sys.stdout.write(".")
+                if inputs[0] in readable:
+                    data = self.comms.read(37)
+                    if data is None or len(data) == 0:
+                        break
+                    direction = "<- "
+                    client.send(data)
+                else:
+                    data = client.recv(37)
+                    if data is None or len(data) == 0:
+                        break
+
+                    self.comms.write(data)
+                    direction = "-> "
+                    
+                sys.stdout.write(direction)
+                for c in data:
+                    sys.stdout.write("%02x" % ord(c))
+
+                sys.stdout.write("\n")
+
                 for fex in exceptional:
                     if fex == inputs[0]:
                         logger.warning("Could not read from panel!")
@@ -1007,6 +1092,13 @@ if __name__ == '__main__':
                 timeRemaining = time.time() - lastKeepAlive + Keep_Alive_Interval
                 if lastKeepAlive > 0 and timeRemaining > 0:
                     myAlarm.testForEvents(Events_Payload_Numeric, Debug_Mode, timeout=timeRemaining)
+
+                # Test for pending Zone Control
+                if Zone_Control_Action == 1:
+                    myAlarm.controlZone(Zone_Control_Number, Zone_Control_NewState, Debug_Mode)
+                    Zone_Control_Action = 0
+                    logger.info( "Listening for events...")
+                    client.publish(Topic_Publish_AppState, "State Machine 4, Listening for events...", 0, True)
 
                 # Test for pending Alarm Control
                 if Alarm_Control_Action == 1:

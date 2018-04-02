@@ -6,16 +6,17 @@ While I would welcome a merge with the origin project, the changes are substanti
 
 Tested in the following environment:
 
-* Python 2.7.13 
+* Python 2.7.12 - 2.7.13 
 * [Mosquitto MQTT Broker v1.4.14](http://mosquitto.org)
-* [OrangePi 2G-IOT](http://www.orangepi.org/OrangePi2GIOT/) through its internal Serial Port
+* [OrangePi 2G-IOT](http://www.orangepi.org/OrangePi2GIOT/) through its internal Serial Port (with a level switch!)
+* NanoPI NEO through its internal Serial Port (with a level switch!) or USB Serial
 * Ubuntu Server 16.04.3 LTS
 * Paradox MG5050 panel
 
 ## Steps to use it:
 1.  Download the files in this repository and place it in some directory
 2.  Edit the config.ini file to match your setup
-3.  Run the script: Python Multi-MQTTv2.py
+3.  Run the script: python ParadoxMulti-MQTT.py
 
 
 ## What to expect:
@@ -23,18 +24,23 @@ Tested in the following environment:
 The behaviour is similar to the one obtained with [ParadoxIP150v2](https://github.com/Tertiush/ParadoxIP150v2), __but there are some RELEVANT changes__. Please check this project documentation.
 
 ## Changes from the original project
-* Using a python logging module, instead of print
-* Polling the serial port is now always done. This may help to discover connectivity losses and will allow to obtain some stats (battery, and eventually zones)
+* Using a python logging module instead of print
+* Polling the serial port is now always done. This may help discovering connectivity losses and will allow to obtain some stats (battery, zones) in real time.
 * Changed the logic so that it handles Paradox messages without the headers required by the connectivity module (Serial or IP150).
 * Abstracted the channel to a separate class.
 * A new config file option was added (SERIAL). See the example.
-* Changes on how to deal with Arming and events. 
+* Changes on how to deal with Arming and events: can Arm/Disarm All partitions
 * Because my scenario is not bandwidth limited, MQTT topics are now more verbose.
 * Voltage values are processed
+* Zone Status is processed
+* Partition Status is processed
 * New KeepAlive mechanism now maintains a constant connection with the module.
-* Processing of zone status bits
+* Events processed asynchronously to reduce latency
+* Zones can be bypassed
+* Message Checksum calculated and invalid messages are filtered
+* PASSTHROUGH Mode, allowing to use Babyware through HW Virtual Serial Port or similar.
 * Many small fixes
-* __PLANED__: Passthrough or IP150 mode, so that an IP150 is emulated and babyware/winload can connect remotelly. Passthrough already tested successfully and will be integrated soon.
+* __PLANED__: IP150 mode, so that an IP150 is emulated and babyware/winload can connect remotely. 
 
 ## What happens in the background:
 The main script will connect to a panel (currently only through Serial) and login with your password (usually 0000). It will then use two seperate classes (containing dictionaries) referenced in from the ParadoxMap.py file to extract different info from the alarm and translate events into meaningfull text. The dictionaries currently supports the MG5050 V4 and V5 firmware but could evolve over time if the community adds more alarm types to the dictionaries.
@@ -91,10 +97,10 @@ Once the script has settled to listen for events, the following topics are avail
     It should be noticed the use of JSON for these events!
 
   * Topic <b>Paradox/Status/Zones/<i>zone label</i></b>
-  Sets a status for each zone (Open, Closed).  Allows Openhab and Homeassistant to easily configure an item for each zone
+  Sets a status for each zone (Open, Closed, Alarm).  Allows Openhab and Homeassistant to easily configure an item for each zone
 
   * Topic <b>Paradox/Status/Partitions</b>
-  Shows the current partition status and events.  Can't be determines on startup though, only while running. 
+  Shows the current partition status and events.  Can't be determined on startup though, only while running. 
 
   * Topic <b>Paradox/Status/Bell</b>
   Shows the current Bell status
@@ -110,13 +116,17 @@ Once the script has settled to listen for events, the following topics are avail
 ### Controls
 * Controlling the alarm or outputs
   * Publish the following topic to control the <b>alarm</b>:
-    * <b>Paradox/Control/Partitions/number or "ALL"</b>
+    * <b>Paradox/Control/Partition/number or "ALL"</b>
     * Payload contains the action = Disarm / Arm / Sleep / Stay
-    * Is ALL is sent (e.g, Paradox/Control/Partitions/ALL), all partitions are set
+    * Is ALL is sent (e.g, Paradox/Control/Partition/ALL), all partitions are set
   * Publish the following topic to control (Force/Pulse) an <b>output</b> (PGM):
     * <b>Paradox/Control/Output/number</b>
     * Payload contains On or Off
     * Pulse outputs are configured for approx. 0.5sec.
+  * Publish the following topic to control a <b>zone</b>:
+    * <b>Paradox/Control/Zone/number or "ALL"</b>
+    * Payload contains Bypass or Clear_Bypass
+    * Is ALL is sent (e.g, Paradox/Control/Zone/ALL), all zones are set
 
 <b>Note: If you modified the subscription topic for <b>controls</b> in the config.ini file ensure it ends with a '/'.</b>
 

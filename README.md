@@ -7,15 +7,14 @@ While I would welcome a merge with the origin project, the changes are substanti
 Tested in the following environment:
 
 * Python 2.7.12 - 2.7.13 
-* [Mosquitto MQTT Broker v1.4.14](http://mosquitto.org)
-* [OrangePi 2G-IOT](http://www.orangepi.org/OrangePi2GIOT/) through its internal Serial Port (with a level switch!)
-* NanoPI NEO through its internal Serial Port (with a level switch!) or USB Serial
-* Ubuntu Server 16.04.3 LTS
+* [Mosquitto MQTT Broker v1.4.10 and v1.4.14](http://mosquitto.org)
+* [OrangePi 2G-IOT](http://www.orangepi.org/OrangePi2GIOT/) and NanoPi NEO through its internal Serial Port (and a level switch!), Raspberry PI 3 and Beaglebone black through USB370 paradox module
+* Ubuntu Server 16.04.3 LTS and Devuan Ceres as for december 2017 for RPI and for Beaglebone black
 * Paradox MG5050 panel
 
 ## Steps to use it:
 1.  Download the files in this repository and place it in some directory
-2.  Edit the config.ini file to match your setup
+2.  Copy config.ini.example to config.ini and edit it to match your setup
 3.  Run the script: python ParadoxMulti-MQTT.py
 
 
@@ -24,9 +23,9 @@ Tested in the following environment:
 The behaviour is similar to the one obtained with [ParadoxIP150v2](https://github.com/Tertiush/ParadoxIP150v2), __but there are some RELEVANT changes__. Please check this project documentation.
 
 ## Changes from the original project
-* Using a python logging module instead of print
+* Using a python logging module, instead of print
 * Polling the serial port is now always done. This may help discovering connectivity losses and will allow to obtain some stats (battery, zones) in real time.
-* Changed the logic so that it handles Paradox messages without the headers required by the connectivity module (Serial or IP150).
+* Changed the logic so that it handles Paradox messages without the headers required by the connectivity module (IP150).
 * Abstracted the channel to a separate class.
 * A new config file option was added (SERIAL). See the example.
 * Changes on how to deal with Arming and events: can Arm/Disarm All partitions
@@ -47,10 +46,10 @@ The main script will connect to a panel (currently only through Serial) and logi
 
 Once the info (mostly labels) has been extracted from the alarm, the MQTT broker is used as middleware between your application and the alarm panel.
 
-Seeing as not all alarm variants are initially supported, you can use the config.ini file to switch off different portions of the script. Not all event types may be implemented, but most shoud be!
+Seeing as not all alarm variants are initially supported, you can use the config.ini file to switch off different portions of the script. Not all event types may be implemented, but most should be!
 
 ### Labels
-If successfully connected to your panel and MQTT broker, the app will optionally start off by publishing (once-off) all the detected labels (zone, partition, output, etc. names) to your broker. Both the reading of label names and publishing thereof can be independantly controlled through the config.ini file. If you do read the labels, events such as "Zone open - Zone number 3" will translate to "Zone open - Garage door" or "Low battery on zone - Zone 1" to "Low battery on zone - Alley Beam" (assuming this is named/configured as such in your alarm).
+If successfully connected to your panel and MQTT broker, the app will optionally start off by publishing (once-off) all the detected labels (zone, partition, output, etc. names) to your broker. Both the reading of label names and publishing thereof can be independently controlled through the config.ini file. If you do read the labels, events such as "Zone open - Zone number 3" will translate to "Zone open - Garage door" or "Low battery on zone - Zone 1" to "Low battery on zone - Alley Beam" (assuming this is named/configured as such in your alarm).
 
 Note: on a Spectre SP5500 these labels do not seem to read.  To this end, I've updated to pull the zone name from the event message and will publish an MQTT topic for the zone name.
 

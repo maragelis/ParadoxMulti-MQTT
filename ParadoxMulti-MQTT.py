@@ -951,6 +951,7 @@ if __name__ == '__main__':
                 MQTT_Username = Config.get("MQTT Broker", "Username")
                 MQTT_Password = Config.get("MQTT Broker", "Password")
 
+
                 Topic_Publish_Events = Config.get("MQTT Topics", "Topic_Publish_Events")
                 Events_Payload_Numeric = Config.get("MQTT Topics", "Events_Payload_Numeric")
                 Topic_Subscribe_Control = Config.get("MQTT Topics", "Topic_Subscribe_Control")

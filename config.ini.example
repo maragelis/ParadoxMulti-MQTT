@@ -1,6 +1,6 @@
 [SERIAL]
-Password: 0000
-SERIAL_PORT: /dev/ttyS1
+Password: 0000                          ;Change with your own Master PIN
+SERIAL_PORT: /dev/ttyS1                 ;For USB370 module use /dev/ttyUSB0
 
 [MQTT Broker]
 IP: 127.0.0.1
@@ -10,7 +10,7 @@ Port: 1883
 Alarm_Model = ParadoxMG5050             ;Currently not used
 Alarm_Registry_Map = ParadoxMG5050      ;This is used to map to the correct dictionary class within the ParadoxMap.py package. The word "Registers" is appended before loading.
 Alarm_Event_Map = ParadoxMG5050         ;This is used to map to the correct dictionary class within the ParadoxMap.py package. The word "EventMap" is appended before loading.
-Zone_Amount = 16
+Zone_Amount = 16                        ;Expandable to 32 zones
 
 [MQTT Topics]
 Topic_Publish_Events = Paradox/Events   ;The main topic used to publish all events

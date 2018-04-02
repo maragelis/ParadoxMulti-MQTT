@@ -35,6 +35,8 @@ SERIAL_PORT = "/dev/ttyS1"
 MQTT_IP = "127.0.0.1"
 MQTT_Port = 1883
 MQTT_KeepAlive = 60  # Seconds
+MQTT_Username = None
+MQTT_Password = None
 
 # Options are Arm, Disarm, Stay, Sleep (case sensitive!)
 Topic_Debug = "Paradox/Debug"
@@ -66,10 +68,10 @@ Output_PControl_NewState = ""
 State_Machine = 0
 Debug_Mode = 2
 Poll_Speed = 1
-Debug_Packets = True
-Keep_Alive_Interval = 2
+Debug_Packets = False
+Keep_Alive_Interval = 3
 
-Alarm_Data = {}
+Alarm_Data = {'zone': [], 'partition': []}
 myAlarm = None
 
 def ConfigSectionMap(section):
@@ -184,6 +186,8 @@ def on_message(client, userdata, msg):
                 logger.info("Reseting Paradox Multi MQTT")
             else:
                 logger.warning("Unknown new state: %s", msg.payload)
+        
+        myAlarm.newCommand()
 
 
 class CommSerial:
@@ -193,6 +197,7 @@ class CommSerial:
         self.serialport = serialport
         self.comm = None
         self.client = mqttc
+        self.interrupted = False
 
     def connect(self, baud=9600, timeout=1):
         try:
@@ -210,24 +215,39 @@ class CommSerial:
 
     def write(self, data):
         if Debug_Packets and logger.isEnabledFor(logging.DEBUG):
-            m = str(len(data)) + " -b- "
-            for c in data:
-                m += " %02x" % ord(c)
-            #logger.debug(m)
-            self.client.publish(Topic_Debug + "/OUT", m, qos=2)
+            if data is not None and len(data) > 0:
+                m = str(len(data)) + " -> "
+                for c in data:
+                    m += " %02x" % ord(c)
+                logger.debug(m)
+                self.client.publish(Topic_Debug + "/OUT", m, qos=2)
         self.comm.write(data)
         
-    def read(self, sz=37, timeout=1):
+    def read(self, sz=37, timeout=1, interruptible=False):
+        self.interrupted = False
+        
         self.comm.timeout = timeout
+        
+        data = None
 
-        data = self.comm.read(sz)
+        if interruptible:
+            now = time.time()
+            while data is None and not self.interrupted and self.comm.is_open and time.time() - now < timeout:
+                if self.comm.in_waiting > 0:
+                    data = self.comm.read(sz)
+                else:
+                    time.sleep(0.25)
+                 
+        else:
+            data = self.comm.read(sz)
 
         if Debug_Packets and logger.isEnabledFor(logging.DEBUG):
             if data is not None and len(data) > 0:
-                m = str(len(data)) + " -b- "                
+                m = str(len(data)) + " <- "                
 
                 for c in data:
                     m += " %02x" % ord(c)
+                logger.debug(m)
                 self.client.publish(Topic_Debug+"/INP", m, qos=2)
 
         return data
@@ -240,6 +260,8 @@ class CommSerial:
     def getfd(self):
         return self.comm.fileno()
 
+    def interrupt(self):
+        self.interrupted = True
 
 # To be implemented. Do dot have the hardware to proceed. 
 class CommIP150:
@@ -425,7 +447,7 @@ class Paradox:
                 
 
                 Alarm_Data['labels'][func] = completed_dict
-                Alarm_Data[func.replace('Label', '')] = [''] * len(Alarm_Data['labels'][func])
+                Alarm_Data[func.replace('Label', '')] = [None] * len(Alarm_Data['labels'][func])
 
                 if Startup_Publish_All_Info == "True":
                     topic = func.split("Label")[0]
@@ -440,7 +462,8 @@ class Paradox:
 
     def testForEvents(self, Events_Payload_Numeric=0, Debug_Mode=0, timeout=1):
     
-        message = self.comms.read(timeout=timeout)
+        # Wait for events during a timeout or until an interruption
+        message = self.comms.read(timeout=timeout, interruptible=True)
         
         if message is None or len(message) < 9:
             return None
@@ -461,13 +484,13 @@ class Paradox:
                     if event.find("Zone ") == 0:
                         client.publish(Topic_Publish_Status + "/Zones/"+subevent.replace(' ','_').title(), event, qos=1, retain=True)
 
-                    elif event == 'Partition status':
+                    elif ord(message[7]) == 0x02:
                         se = ord(message[8])
-                        if se in [2, 3, 4, 5, 6, 7, 11, 12, 14]:
-                            client.publish(Topic_Publish_Status + "/Partitions/", subevent, qos=1, retain=True)
+                        if se in [2, 3, 4, 5, 6, 7, 13, 99]:
+                            client.publish(Topic_Publish_Status + "/Partitions/All", subevent, qos=1, retain=True)
                             
-                    elif ord(message[7]) in [29, 30, 31, 32, 33, 40, 44, 45] :
-                        client.publish(Topic_Publish_Status + "/System/", event + " -> " + subevent, qos=1, retain=True)
+                    elif ord(message[7]) != 0x03:
+                        client.publish(Topic_Publish_Status + "/System", event + " -> " + subevent, qos=1, retain=True)
 
                 except ValueError:
                     reply = "No register entry for Event: " + str(ord(message[7])) + ", Sub-Event: " + str(
@@ -536,26 +559,20 @@ class Paradox:
         return
 
     def controlPGM(self, pgm, state="OFF", Debug_Mode=0):
-       
-        if isinstance(pgm, basestring):
-            if pgm == "ALL":
-                pgm = range(1, 1 + len(Alarm_Data['labels']['outputLabel']))
-            else:
-                try:
-                    pgm = json.loads(pgm)
-                    if not isinstance(pgm, list):
-                        logger.warning("PGM must be str, int or list")
-                        return
-                except:
-                    logger.warning("Could not decode partition list")
+
+        if pgm.isdigit():
+            pgm = [int(pgm)]
+        if pgm == "ALL":
+            pgm = range(1, 1 + len(Alarm_Data['labels']['outputLabel']))
+        else:
+            try:
+                pgm = json.loads(pgm)
+                if not isinstance(pgm, list):
+                    logger.warning("PGM must be str, int or list")
                     return
-
-        elif isinstance(pgm, int):
-            pgm = [pgm]
-
-        elif not isinstance(pgm, list):
-            logger.warning("PGM must be str, int or list")
-            return
+            except:
+                logger.warning("Could not decode partition list")
+                return
 
         if not state in ["ON", "1", "TRUE", "ENABLE", "OFF", "FALSE", "0", "DISABLE"]:
             logger.warning("PGM State is not given correctly: %r" % str(state))
@@ -581,37 +598,29 @@ class Paradox:
                 continue
     
             message = registers[p][state]
-
             message = message.ljust(36, '\x00')
-
             reply = self.readDataRaw(self.format37ByteMessage(message), Debug_Mode)
-
+            
         return
 
-    def controlAlarm(self, partition=1, state="Disarm", Debug_Mode=0):
-
-        state = state.split(' ')[0].upper()
+    def controlAlarm(self, partition="1", state="Disarm", Debug_Mode=0):
         
+        partition = partition.upper()
+        state = state.split(' ')[0].upper()
 
-        if isinstance(partition, basestring):
-            if partition == "ALL":
-                partition = range(1, 1 + len(Alarm_Data['labels']['partitionLabel']))
-            else:
-                try:
-                    partition = json.loads(partition)
-                    if not isinstance(partition, list):
-                        logger.warning("Partition must be str, int or list")
-                        return
-                except:
-                    logger.warning("Could not decode partition list")
+        if partition.isdigit():
+            partition = [int(partition)]
+        elif partition == "ALL":
+            partition = range(1, 1 + len(Alarm_Data['labels']['partitionLabel']))
+        else:
+            try:
+                partition = json.loads(partition)
+                if not isinstance(partition, list):
+                    logger.warning("Partition must be str, int or list")
                     return
-
-        elif isinstance(partition, int):
-            partition = [partition]
-
-        elif not isinstance(partition, list):
-            logger.warning("Partition must be str, int or list")
-            return
+            except:
+                logger.warning("Could not decode partition list")
+                return
         
         for p in partition:
             if not p in self.registermap.getcontrolAlarmRegister().keys():
@@ -645,7 +654,8 @@ class Paradox:
             message += "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
 
             data = self.readDataRaw(self.format37ByteMessage(message), testForEvents=True)
-            if len(data) != 37:
+            if len(data) != 37 or ord(data[0]) != 0x52 or ord(data[3]) != aliveSeq:
+                logger.warn("Invalid message")
                 return
 
             if aliveSeq == 0:
@@ -682,23 +692,41 @@ class Paradox:
                         state  = "Zone OK"
                     else:
                         state = "Zone open"
-                    if Alarm_Data['zone'][i] != state and ('open' in Alarm_Data['zone'][i] or 'OK' in Alarm_Data['zone'][i] or Alarm_Data['zone'][i] == ''):
-                         Alarm_Data['zone'][i] = state
-                         client.publish(Topic_Publish_Status+"/Zones/"+Alarm_Data['labels']['zoneLabel'][i + 1].replace(' ','_').title(), Alarm_Data['zone'][i], retain=True)
+                    
+                    if Alarm_Data['zone'][i] is None or (Alarm_Data['zone'][i] != state and ('open' in Alarm_Data['zone'][i] or 'OK' in Alarm_Data['zone'][i])):
+                        Alarm_Data['zone'][i] = state
+                        client.publish(Topic_Publish_Status+"/Zones/"+Alarm_Data['labels']['zoneLabel'][i + 1].replace(' ','_').title(), Alarm_Data['zone'][i], retain=True)
                        
             elif aliveSeq == 1:
+                changed = False
+
                 for i in [0, 1]:
                     state = 0
+
+                    # Arming
                     if ord(data[18 + i * 4]) == 0x01:
-                        state = "Arming"
+                        state = "Arm"
                     elif ord(data[17 + i * 4]) == 0x01:
-                        state = "Armed"
+                        state = "Arm"
                     else:
-                        state  = "Disarmed"
+                        state  = "Disarm"
+
                     if Alarm_Data['partition'][i] != state:
+                        client.publish(Topic_Publish_Status + "/Partitions/%d" % (i + 1), str(state), retain=True )
                         Alarm_Data['partition'][i] = state
-                        client.publish(Topic_Publish_Status + "/Partitions/%d/" % (i + 1), state )
+                        changed = True
                 
+                if changed:
+                    # See if all partitions are in the same state
+                    states = dict()
+                    for p in Alarm_Data['partition']:
+                        states[p] = 1
+
+                    if len(states.keys()) == 1:
+                        client.publish(Topic_Publish_Status + "/Partitions/All", str(states.keys()[0]), retain=True )
+                    else:
+                        client.publish(Topic_Publish_Status + "/Partitions/All", "Mixed", retain=True )
+        
 
             aliveSeq += 1
         
@@ -779,6 +807,11 @@ class Paradox:
     def stopSerialPassthrough(self):
         self.mode = 0
 
+    def newCommand(self):
+        # Got a new command. If possible, process it.
+        self.comms.interrupt()
+
+
 
 if __name__ == '__main__':
 
@@ -805,6 +838,9 @@ if __name__ == '__main__':
 
                 MQTT_IP = Config.get("MQTT Broker", "IP")
                 MQTT_Port = int(Config.get("MQTT Broker", "Port"))
+                MQTT_KeepAlive = int(Config.get("MQTT Broker", "KeepAlive"))
+                MQTT_Username = Config.get("MQTT Broker", "Username")
+                MQTT_Password = Config.get("MQTT Broker", "Password")
 
                 Topic_Publish_Events = Config.get("MQTT Topics", "Topic_Publish_Events")
                 Events_Payload_Numeric = Config.get("MQTT Topics", "Events_Payload_Numeric")
@@ -814,6 +850,7 @@ if __name__ == '__main__':
                 Topic_Publish_AppState = Config.get("MQTT Topics", "Topic_Publish_AppState")
                 Startup_Update_All_Labels = Config.get("Application", "Startup_Update_All_Labels")
                 Debug_Mode = int(Config.get("Application", "Debug_Mode"))
+
                 if Debug_Mode == 1:
                     logger.setLevel(logging.INFO)
                 elif Debug_Mode == 2:
@@ -836,6 +873,8 @@ if __name__ == '__main__':
                 client = mqtt.Client()
                 client.on_connect = on_connect
                 client.on_message = on_message
+                if MQTT_Username is not None:
+                    client.username_pw_set(username=MQTT_Username, password=MQTT_Password)
 
                 client.connect(MQTT_IP, MQTT_Port, MQTT_KeepAlive)
 

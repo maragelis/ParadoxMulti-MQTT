@@ -31,7 +31,7 @@ The behaviour is similar to the one obtained with [ParadoxIP150v2](https://githu
 * Changes on how to deal with Arming and events: can Arm/Disarm All partitions
 * Because my scenario is not bandwidth limited, MQTT topics are now more verbose.
 * Voltage values are processed
-* Zone Status is processed
+* Zone Status is processed (Arm, Disarm and Bypass)
 * Partition Status is processed
 * New KeepAlive mechanism now maintains a constant connection with the module.
 * Events processed asynchronously to reduce latency

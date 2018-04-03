@@ -74,6 +74,7 @@ Debug_Mode = 2
 Poll_Speed = 1
 Debug_Packets = False
 Keep_Alive_Interval = 5
+State_Machine_Exception_Exit = True
 
 Alarm_Data = {'zone': [], 'partition': []}
 myAlarm = None
@@ -111,6 +112,9 @@ def on_message(client, userdata, msg):
     global Output_PControl_Number
     global Output_PControl_NewState
     global Output_PControl_Action
+    global Zone_Control_Number
+    global Zone_Control_NewState
+    global Zone_Control_Action
     global State_Machine
     global Debug_Packets
 
@@ -197,6 +201,7 @@ def on_message(client, userdata, msg):
             elif msg.payload.upper() == "NORMAL" and State_Machine == 20:
                 if myAlarm is not None:
                     myAlarm.stopSerialPassthrough()
+                State_Machine = 0
                 logger.info("Switching to Standard mode")
             elif msg.payload.upper() == "PASSTHROUGH":
                 State_Machine = 20
@@ -240,8 +245,8 @@ class CommSerial:
                 self.client.publish(Topic_Debug + "/OUT", m, qos=2)
         self.comm.write(data)
         
-    def read(self, sz=37, timeout=1):        
-        self.comm.timeout = timeout
+    def read(self, sz=37, timeout=5):        
+        self.comm.timeout = timeout / 5.0
 
         data = ""
         tstart = time.time()
@@ -367,6 +372,7 @@ class Paradox:
         
         self.comms.registerMessageCallback('\xe0', self.handleEvent)
         self.comms.registerMessageCallback('\xe2\x14', self.handleEvent)
+        
 
     def skipLabelUpdate(self):
         return self.Skip_Update_Labels
@@ -497,6 +503,12 @@ class Paradox:
 
             except Exception, e:
                 logger.exception( "Failed to load supported function's mapping: " + repr(e))
+        
+        
+        #Initialize Zone structure (if label is present)
+        if 'zone' in Alarm_Data:
+            for i in range(0, len(Alarm_Data['zone'])):
+                Alarm_Data['zone'][i] = {'state': None, 'bypass': False}
 
         return
 
@@ -699,7 +711,7 @@ class Paradox:
         if zone.isdigit():
             zone = [int(zone)]
         elif zone == "ALL":
-            zone = range(1, 1 + len(Alarm_Data['labels']['zoneLabel']))
+            zone = range(1, len(Alarm_Data['labels']['zoneLabel']))
         else:
             try:
                 zone = json.loads(zone)
@@ -712,11 +724,11 @@ class Paradox:
         
         for z in zone:
             if not z in self.registermap.getcontrolZoneRegister().keys():
-                logger.warning("Unkown Zone")
+                logger.warning("Unkown Zone: %s" % z)
                 return
-
-            if not state in self.registermap.getcontrolZoneRegister()[p].keys():
-                logger.warning("State is not given correctly: %r for zone %d" % (str(state), p))
+            
+            if not state in self.registermap.getcontrolZoneRegister()[z].keys():
+                logger.warning("State is not given correctly: %r for zone %d" % (str(state), z))
                 return
 
         self.controlGenericZone(self.registermap.getcontrolZoneRegister(), zone, state, Debug_Mode)
@@ -736,7 +748,7 @@ class Paradox:
 
         aliveSeq = 0
     
-        while aliveSeq < 2:
+        while aliveSeq < 3:
             message = "\x50\x00\x80"
             message += bytes(bytearray([aliveSeq]))
             message += "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
@@ -790,9 +802,12 @@ class Paradox:
                     else:
                         state = "Zone open"
                     
-                    if Alarm_Data['zone'][i] is None or (Alarm_Data['zone'][i] != state and ('open' in Alarm_Data['zone'][i] or 'OK' in Alarm_Data['zone'][i])):
-                        Alarm_Data['zone'][i] = state
-                        client.publish(Topic_Publish_Status+"/Zones/"+Alarm_Data['labels']['zoneLabel'][i + 1].replace(' ','_').title(), Alarm_Data['zone'][i], retain=True)
+                    oldState = Alarm_Data['zone'][i]['state']
+                    if oldState is None or oldState != state and ('open' in oldState or 'OK' in oldState):
+                        
+                        Alarm_Data['zone'][i]['state'] = state
+                        
+                        client.publish(Topic_Publish_Status+"/Zones/"+Alarm_Data['labels']['zoneLabel'][i + 1].replace(' ','_').title(), state, retain=True)
                        
             elif aliveSeq == 1:
                 changed = False
@@ -823,6 +838,28 @@ class Paradox:
                         client.publish(Topic_Publish_Status + "/Partitions/All", str(states.keys()[0]), retain=True )
                     else:
                         client.publish(Topic_Publish_Status + "/Partitions/All", "Mixed", retain=True )
+            
+            elif aliveSeq == 2:
+                for i in range(0, len(Alarm_Data['zone']) - 1 ):
+                    state = ord(data[4 + i])
+                    changed = False
+
+                    if state & 0x08 != 0:
+                        if not Alarm_Data['zone'][i]['bypass']:
+                            changed = True
+                        Alarm_Data['zone'][i]['bypass'] = True
+                    else:
+                        if Alarm_Data['zone'][i]['bypass']:
+                            changed = True
+                        Alarm_Data['zone'][i]['bypass'] = False
+                
+                    if changed:
+                        m = Alarm_Data['zone'][i]['state']
+                        if Alarm_Data['zone'][i]['bypass']:
+                            m += " (Bypass)"
+
+                        client.publish(Topic_Publish_Status+"/Zones/"+Alarm_Data['labels']['zoneLabel'][i + 1].replace(' ','_').title(), m, retain=True)
+
             aliveSeq += 1
         
     def walker(self, ):
@@ -851,6 +888,7 @@ class Paradox:
 
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.setblocking(0)
+        self.comms.timeout = 1
 
         try:
             s.bind((Socket_Address, Socket_Port))
@@ -880,14 +918,13 @@ class Paradox:
 
             inputs.append(client)
 
-            print(inputs)
             while self.mode == 1:
                 readable, writable, exceptional = select.select(inputs, [] , inputs, 5)
 
                 if inputs[0] in readable:
                     data = self.comms.read(37)
                     if data is None or len(data) == 0:
-                        break
+                        continue
                     direction = "<- "
                     client.send(data)
                 else:
@@ -942,15 +979,11 @@ if __name__ == '__main__':
                 if Zone_Amount % 2 != 0:
                     Zone_Amount += 1
 
-                passw = Config.get ("SERIAL", "Password")
-                SERIAL_PORT = Config.get("SERIAL", "SERIAL_PORT")
-
                 MQTT_IP = Config.get("MQTT Broker", "IP")
                 MQTT_Port = int(Config.get("MQTT Broker", "Port"))
                 MQTT_KeepAlive = int(Config.get("MQTT Broker", "KeepAlive"))
                 MQTT_Username = Config.get("MQTT Broker", "Username")
                 MQTT_Password = Config.get("MQTT Broker", "Password")
-
 
                 Topic_Publish_Events = Config.get("MQTT Topics", "Topic_Publish_Events")
                 Events_Payload_Numeric = Config.get("MQTT Topics", "Events_Payload_Numeric")
@@ -1096,7 +1129,7 @@ if __name__ == '__main__':
                 timeRemaining = time.time() - lastKeepAlive + Keep_Alive_Interval
                 if lastKeepAlive > 0 and timeRemaining > 0:
                     myAlarm.testForEvents(Events_Payload_Numeric, Debug_Mode, timeout=timeRemaining)
-
+                
                 # Test for pending Zone Control
                 if Zone_Control_Action == 1:
                     myAlarm.controlZone(Zone_Control_Number, Zone_Control_NewState, Debug_Mode)
@@ -1139,6 +1172,9 @@ if __name__ == '__main__':
 
                 logger.exception( "Error during normal poll: " + repr(e) + ", Attempt: " + str(attempts))
                 client.publish(Topic_Publish_AppState, "State Machine 4, Exception: " + repr(e), 0, True)
+                if State_Machine_Exception_Exit:
+                    sys.exit(-1)
+
                 time.sleep(Poll_Speed * 5)
                 attempts -= 1
 

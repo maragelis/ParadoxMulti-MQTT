@@ -928,10 +928,12 @@ class Paradox:
                     direction = "<- "
                     client.send(data)
                 else:
-                    data = client.recv(37)
-                    if data is None or len(data) == 0:
+                    try:
+                        data = client.recv(37)
+                        if data is None or len(data) == 0:
+                            break
+                    except:
                         break
-
                     self.comms.write(data)
                     direction = "-> "
                     

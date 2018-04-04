@@ -250,7 +250,7 @@ class CommSerial:
 
         data = ""
         tstart = time.time()
-        while True:
+        while time.time() < (tstart + timeout):
 
             while not self.checksum(data) and time.time() < (tstart + timeout):
                 
@@ -284,10 +284,16 @@ class CommSerial:
             for k in self.callbacks.keys():
                 if data.startswith(k):
                     self.callbacks[k](data)
+                    data = None
+                    break
             else:
                 return data
 
+            if data is None:
+                continue
+
         return data
+
     def disconnect(self):
         self.comm.close()
         

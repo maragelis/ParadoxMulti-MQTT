@@ -284,12 +284,12 @@ class CommSerial:
             for k in self.callbacks.keys():
                 if data.startswith(k):
                     self.callbacks[k](data)
-                    data = None
+                    data = ""
                     break
             else:
                 return data
 
-            if data is None:
+            if data == "":
                 continue
 
         return data
@@ -312,7 +312,7 @@ class CommSerial:
 
         if data is None:
             return False
-            
+
         if len(data) != 37:
             return False
 

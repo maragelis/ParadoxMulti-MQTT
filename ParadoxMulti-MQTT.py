@@ -238,11 +238,7 @@ class CommSerial:
     def write(self, data):
         if Debug_Packets and logger.isEnabledFor(logging.DEBUG):
             if data is not None and len(data) > 0:
-                m = str(len(data)) + " -> "
-                for c in data:
-                    m += " %02x" % ord(c)
-                logger.debug(m)
-                self.client.publish(Topic_Debug + "/OUT", m, qos=2)
+                self.dumpBuffer(data, direction="out")
         self.comm.write(data)
         
     def read(self, sz=37, timeout=5):        
@@ -250,49 +246,47 @@ class CommSerial:
 
         data = ""
         tstart = time.time()
-        while time.time() < (tstart + timeout):
-
-            while not self.checksum(data) and time.time() < (tstart + timeout):
-                
-                recv_data = self.comm.read(sz)
-                # Unable to read. Return None
-                if recv_data is None:
-                    return None
-
-                if len(data) > 0:
-                    # If are here, the packet is corrupted. Lets read what is left
-                    data = data[1:] + recv_data
-                else:
-                    data = recv_data
-                    sz = min(1, self.comm.in_waiting) #In the next read we get the missing bytes
+        read_sz = sz
+        while time.time() < (tstart + timeout): 
+            recv_data = self.comm.read(read_sz)
             
-            # Message is invalid. Discard
+            if recv_data is None:
+                continue
+
+            data += recv_data
+            
+            if len(data) < sz:
+                continue
+
+            # We may have multiple packets, some corrupted
+            # Must find the correct packets
+            while not self.checksum(data) and len(data) >= 37:
+                data = data[1:]
+            
+            # Message is invalid! Lets try to get the missing data
             if not self.checksum(data):
-                return None
+                # If data is waiting, get it, otherwise read 1 byte at a time
+                if self.comm.in_waiting > 0:
+                    read_sz = self.comm.in_waiting
+                else:
+                    read_sz = 1
+                
+                continue
 
             if Debug_Packets and logger.isEnabledFor(logging.DEBUG):
-                if data is not None and len(data) > 0:
-                    m = str(len(data)) + " <- "                
-
-                    for c in data:
-                        m += " %02x" % ord(c)
-                    logger.debug(m)
-
-                    self.client.publish(Topic_Debug+"/INP", m, qos=2)
-
+                self.dumpBuffer(data, direction="in")
+            
             # If message is async, deliver through the callback
             for k in self.callbacks.keys():
                 if data.startswith(k):
                     self.callbacks[k](data)
-                    data = ""
+                    data = data[37:] 
                     break
             else:
                 return data
+            
+        return None
 
-            if data == "":
-                continue
-
-        return data
 
     def disconnect(self):
         self.comm.close()
@@ -304,24 +298,47 @@ class CommSerial:
         return self.comm.fileno()
 
     def registerMessageCallback(self, mid, callback):
-        logger.debug("Register callback for message")
+        s = ""
+        for c in mid:
+            s += " %02x" % ord(c)
+
+        logger.debug("Register callback for message: %s" % s)
         self.callbacks[mid] = callback
 
     def checksum(self, data):
         c = 0
-
+        
         if data is None:
             return False
-
-        if len(data) != 37:
+        
+        if len(data) < 37:
             return False
 
-        for i in data[:-1]:
+        for i in data[:36]:
             c += ord(i)
 
-        r = (c % 256) == ord(data[-1])
-
+        r = (c % 256) == ord(data[36])
         return r
+
+    def dumpBuffer(self, data, direction="in"):
+        if data is not None and len(data) > 0:
+            topic = "Packet"
+            m = str(len(data))
+            if direction == "in":
+                m += " <- "
+                topic = "IN_Packet"
+            elif direction == "out":
+                m += " -> "
+                topic = "OUT_Packet"
+            else:
+                m += " "
+
+            for c in data:
+                m += " %02x" % ord(c)
+
+            logger.debug(m)
+
+            self.client.publish(Topic_Debug + "/" + topic, m, qos=2)
 
 # To be implemented. Do dot have the hardware to proceed. 
 class CommIP150:

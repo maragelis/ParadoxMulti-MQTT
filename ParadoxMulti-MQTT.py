@@ -310,6 +310,9 @@ class CommSerial:
     def checksum(self, data):
         c = 0
 
+        if data is None:
+            return False
+            
         if len(data) != 37:
             return False
 

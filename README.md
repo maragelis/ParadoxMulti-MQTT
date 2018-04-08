@@ -1,4 +1,8 @@
 # Paradox Multi-MQTT
+
+__This project will not be further updated__
+__New codebase here [Paradox Alarm Interface](https://github.com/jpbarraca/pai)__
+
 Python-based 'middleware' that aims to use any method to connect to a Paradox Alarm, exposing the interface for monitoring and control via an MQTT Broker.
 Currently access through the Serial port is implemented. As this a fork of the [ParadoxIP150v2](https://github.com/Tertiush/ParadoxIP150v2) project, access through the IP150 can be easily (re-)added (volunteers wanted). As I do not have access to the module, it is impossible for me to test it.
 
